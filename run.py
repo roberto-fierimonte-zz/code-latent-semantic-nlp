@@ -24,14 +24,17 @@ class RunWords(object):
 
         self.vocab_size = solver_kwargs['vocab_size']
 
+        # Load the data when the training procedure is initialised
         self.X_train, self.X_test, self.L_train, self.L_test = self.load_data(dataset, train_prop, restrict_min_length,
                                                                               restrict_max_length)
 
         print('# training sentences = ' + str(len(self.L_train)))
         print('# test sentences = ' + str(len(self.L_test)))
 
+        # Get the actual maximum length of all the sentences
         self.max_length = np.concatenate((self.X_train, self.X_test), axis=0).shape[1]
 
+        # Initialise the Variational method used to solve the model
         self.vb = solver(max_length=self.max_length, **self.solver_kwargs)
 
         self.pre_trained = pre_trained
@@ -191,21 +194,30 @@ class RunWords(object):
 
         print('='*10)
 
+    # From here onwards, each function performs a different task
+    
     def train(self, n_iter, batch_size, num_samples, word_drop=None, grad_norm_constraint=None, update=adam,
               update_kwargs=None, warm_up=None, val_freq=None, val_batch_size=0, val_num_samples=0, val_print_gen=5,
               val_beam_size=15, save_params_every=None):
 
+        # If we already have parameters load them
         if self.pre_trained:
             with open(os.path.join(self.load_param_dir, 'updates.save'), 'rb') as f:
                 saved_update = cPickle.load(f)
         else:
             saved_update = None
 
-        optimiser, updates = self.vb.optimiser(num_samples=num_samples, grad_norm_constraint=grad_norm_constraint,
-                                               update=update, update_kwargs=update_kwargs, saved_update=saved_update)
+        # Initialise training algorithm starting from the Variational Bayes method
+        optimiser, updates = self.vb.optimiser(num_samples=num_samples,
+                                               grad_norm_constraint=grad_norm_constraint,
+                                               update=update,
+                                               update_kwargs=update_kwargs,
+                                               saved_update=saved_update)
 
+        # Initialise ELBO function (symbolic function)
         elbo_fn = self.vb.elbo_fn(val_num_samples)
 
+        # Initialise functions to generate samples (symbolic)
         generate_output_prior = self.get_generate_output_prior(val_print_gen, val_beam_size)
         generate_output_posterior = self.get_generate_output_posterior(val_beam_size)
 
@@ -213,12 +225,17 @@ class RunWords(object):
 
             start = time.clock()
 
+            # Randomly select training batch
             batch_indices = np.random.choice(len(self.X_train), batch_size)
             batch = np.array([self.X_train[ind] for ind in batch_indices])
 
+            # Keep KL term annealed at the beginning
             beta = 1. if warm_up is None or i > warm_up else float(i) / warm_up
 
             if word_drop is not None:
+
+                # Drop a fraction of the words to ensure KL term does not collapse to 0
+
                 L = np.array([self.L_train[ind] for ind in batch_indices])
                 drop_indices = np.array([np.random.permutation(np.arange(i))[:int(np.floor(word_drop*i))] for i in L])
                 drop_mask = np.ones_like(batch)
@@ -227,6 +244,7 @@ class RunWords(object):
             else:
                 drop_mask = None
 
+            # Perform training iteration using the current settings
             elbo, kl, pp = self.call_optimiser(optimiser, batch, beta, drop_mask)
 
             print('Iteration ' + str(i + 1) + ': ELBO = ' + str(elbo/batch_size) + ' (KL = ' + str(kl/batch_size) +
@@ -234,6 +252,8 @@ class RunWords(object):
                   ' seconds)')
 
             if val_freq is not None and i % val_freq == 0:
+
+                # Perform evaluation iterations regularly (calculate ELBO on a validation set and generate output posterior)
 
                 val_batch_indices = np.random.choice(len(self.X_test), val_batch_size)
                 val_batch = np.array([self.X_test[ind] for ind in val_batch_indices])
@@ -256,6 +276,8 @@ class RunWords(object):
 
             if save_params_every is not None and i % save_params_every == 0 and i > 0:
 
+                # Save all parameters regularly
+
                 with open(os.path.join(self.out_dir, 'all_embeddings.save'), 'wb') as f:
                     cPickle.dump(self.vb.all_embeddings.get_value(), f, protocol=cPickle.HIGHEST_PROTOCOL)
 
@@ -267,6 +289,8 @@ class RunWords(object):
 
                 with open(os.path.join(self.out_dir, 'updates.save'), 'wb') as f:
                     cPickle.dump(updates, f, protocol=cPickle.HIGHEST_PROTOCOL)
+
+        # Save all parameters and terminate training phase
 
         with open(os.path.join(self.out_dir, 'all_embeddings.save'), 'wb') as f:
             cPickle.dump(self.vb.all_embeddings.get_value(), f, protocol=cPickle.HIGHEST_PROTOCOL)

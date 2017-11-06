@@ -6,27 +6,31 @@ from lasagne.updates import norm_constraint
 
 class SGVBWords(object):
 
+    """
+    Implementation of the Stochastic Gradient Variational Bayes algorithm for VAEs
+    """
+
     def __init__(self, generative_model, recognition_model, z_dim, max_length, vocab_size, embedding_dim, dist_z_gen,
                  dist_x_gen, dist_z_rec, gen_nn_kwargs, rec_nn_kwargs, eos_ind):
 
-        self.z_dim = z_dim
-        self.max_length = max_length
-        self.vocab_size = vocab_size
-        self.embedding_dim = embedding_dim
+        self.z_dim = z_dim                                                          # dimension of the latent variable
+        self.max_length = max_length                                                # actual maximum length of any sentence
+        self.vocab_size = vocab_size                                                # number of distinct tokens in vocabulary
+        self.embedding_dim = embedding_dim                                          # size of the embedding
 
-        self.all_embeddings = theano.shared(np.float32(np.random.normal(0., 0.1, (vocab_size, embedding_dim))))
+        self.all_embeddings = theano.shared(np.float32(np.random.normal(0., 0.1, (vocab_size, embedding_dim))))  # embedder
 
-        self.dist_z_gen = dist_z_gen
-        self.dist_x_gen = dist_x_gen
-        self.dist_z_rec = dist_z_rec
+        self.dist_z_gen = dist_z_gen                                                # distribution for the latents in the generative model
+        self.dist_x_gen = dist_x_gen                                                # distribution for the observed in the generative model
+        self.dist_z_rec = dist_z_rec                                                # distribution for the latents in the recognition model
 
-        self.gen_nn_kwargs = gen_nn_kwargs
-        self.rec_nn_kwargs = rec_nn_kwargs
+        self.gen_nn_kwargs = gen_nn_kwargs                                          # params for the generative model
+        self.rec_nn_kwargs = rec_nn_kwargs                                          # params for the recognition model
 
-        self.generative_model = self.init_generative_model(generative_model)
-        self.recognition_model = self.init_recognition_model(recognition_model)
+        self.generative_model = self.init_generative_model(generative_model)        # initialise generative model
+        self.recognition_model = self.init_recognition_model(recognition_model)     # initialise recognition model
 
-        self.eos_ind = eos_ind
+        self.eos_ind = eos_ind                                                      # index of the EOS token
 
     def init_generative_model(self, generative_model):
 

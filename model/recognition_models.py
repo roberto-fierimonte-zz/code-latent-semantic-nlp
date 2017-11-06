@@ -12,21 +12,31 @@ random = RandomStreams(1234)
 
 class RecModel(object):
 
+    """
+    Implementation of a Recognition model
+    """
+
     def __init__(self, z_dim, max_length, vocab_size, dist_z):
 
-        self.z_dim = z_dim
-        self.max_length = max_length
-        self.vocab_size = vocab_size
+        self.z_dim = z_dim                          # dimension of the latent space
+        self.max_length = max_length                # maximum length of all the sentences
+        self.vocab_size = vocab_size                # number of distinct tokens in the text
 
-        self.dist_z = dist_z()
+        self.dist_z = dist_z()                      # distribution for the latents in the recognition model
 
-        self.mean_nn, self.cov_nn = self.nn_fn()
+        self.mean_nn, self.cov_nn = self.nn_fn()    # variational mean and covariance for the latents
 
     def nn_fn(self):
 
         raise NotImplementedError()
 
     def get_means_and_covs(self, X, X_embedded):
+
+        """
+        :param X: N * max(L) matrix representing the text
+        :param X_embedded: N * max(L) * D tensor representing the embedded text
+        :return: variational mean and covariance for the latents given a sentence
+        """
 
         mask = T.switch(T.lt(X, 0), 0, 1)  # N * max(L)
 
@@ -38,6 +48,7 @@ class RecModel(object):
         return means, covs
 
     def get_samples(self, X, X_embedded, num_samples, means_only=False):
+
         """
         :param X: N * max(L) matrix
         :param X_embedded: N * max(L) * D tensor
@@ -57,11 +68,13 @@ class RecModel(object):
         return samples
 
     def log_q_z(self, z, X, X_embedded):
+
         """
         :param z: (S*N) * dim(z) matrix
         :param X: N * max(L) * D tensor
+        :param X_embedded: N * max(L) * D tensor
 
-        :return:
+        :return: logarithm of the variational density calculated in z
         """
 
         N = X.shape[0]
@@ -75,6 +88,7 @@ class RecModel(object):
         return self.dist_z.log_density(z, [means, covs])
 
     def kl_std_gaussian(self, X, X_embedded):
+
         """
         :param X: N * max(L) * D tensor
 
@@ -89,6 +103,15 @@ class RecModel(object):
 
     def get_samples_and_kl_std_gaussian(self, X, X_embedded, num_samples, means_only=False):
 
+        """
+
+        :param X:
+        :param X_embedded:
+        :param num_samples:
+        :param means_only:
+        :return:
+        """
+
         means, covs = self.get_means_and_covs(X, X_embedded)
 
         if means_only:
@@ -101,6 +124,13 @@ class RecModel(object):
         return samples, kl
 
     def summarise_z(self, all_x, all_x_embedded):
+
+        """
+
+        :param all_x:
+        :param all_x_embedded:
+        :return:
+        """
 
         def step(all_x_s, all_x_embedded_s):
 
@@ -125,17 +155,33 @@ class RecModel(object):
 
     def get_params(self):
 
+        """
+
+        :return:
+        """
+
         nn_params = get_all_params(get_all_layers([self.mean_nn, self.cov_nn]), trainable=True)
 
         return nn_params
 
     def get_param_values(self):
 
+        """
+
+        :return:
+        """
+
         nn_params_vals = get_all_param_values(get_all_layers([self.mean_nn, self.cov_nn]))
 
         return [nn_params_vals]
 
     def set_param_values(self, param_values):
+
+        """
+
+        :param param_values:
+        :return:
+        """
 
         [nn_params_vals] = param_values
 
@@ -144,6 +190,9 @@ class RecModel(object):
 
 class RecRNN(RecModel):
 
+    """
+    Implementation of a RNN Recognition model
+    """
     def __init__(self, z_dim, max_length, vocab_size, dist_z, nn_kwargs):
 
         self.nn_rnn_depth = nn_kwargs['rnn_depth']
@@ -160,6 +209,10 @@ class RecRNN(RecModel):
 
     def rnn_fn(self):
 
+        """
+        Initialise recognition RNN. The network is structured as an Input Layer, followed by
+        a variable number of LSTM layers. The input can be masked.
+        """
         l_in = InputLayer((None, self.max_length, self.vocab_size))
 
         l_mask = InputLayer((None, self.max_length))
