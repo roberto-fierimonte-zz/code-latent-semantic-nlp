@@ -80,21 +80,29 @@ class RunWords(object):
                 words_d = d.read()
                 words += json.loads(words_d)
 
+        L = np.array([len(s) for s in words])
+
+        max_L = max(L)
+
+        # We want to identify meaningful words using different approaches
         if 'most_common' in kwargs:
             c = Counter()
             for w in words:
                 c.update(w)
-            most_common = {k for (k, _) in c.most_common(kwargs['most_common'])}
+            most_common = [k for (k, _) in c.most_common(kwargs['most_common'])]
+            meaningful_mask = np.full((len(words), max_L), 0)
+            for i, w in enumerate(words):
+                meaningful_mask[i, 0:len(w)] = ~np.in1d(w, most_common)
 
-        if 'tf-idf' in kwargs:
-            # TODO
-            most_frequent = []
-            for w in words:
-                most_frequent.append([i for i in w if tf_idf(i, w, words) < kwargs['tf-idf']])
+        elif 'tf-idf' in kwargs:
+            meaningful_mask = np.full((len(words), max_L), 0)
+            for i, w in enumerate(words):
+                meaningful_mask[i, 0:len(w)] = ~np.in1d(w, [i for i in w if tf_idf(i, w, words) < kwargs['tf-idf']])
 
-        L = np.array([len(s) for s in words])
-
-        max_L = max(L)
+        else:
+            meaningful_mask = np.full((len(words), max_L), 0)
+            for i, w in enumerate(words):
+                meaningful_mask[i, 0:len(w)] = np.ones(w)
 
         word_arrays = []
 
@@ -118,7 +126,7 @@ class RunWords(object):
         training_mask = np.random.rand(len(words_to_return)) < train_prop
 
 
-        return words_to_return[training_mask], words_to_return[~training_mask], L[training_mask], L[~training_mask]
+        return words_to_return[training_mask], words_to_return[~training_mask], L[training_mask], L[~training_mask],
 
     def call_elbo_fn(self, elbo_fn, x):
 
