@@ -1,4 +1,4 @@
-from collections import OrderedDict
+from collections import OrderedDict, Counter
 import os
 import pickle as cPickle
 import time
@@ -7,12 +7,14 @@ import json
 from lasagne.updates import adam
 from data_processing.utilities import chunker
 
+from .process_dataset import tf_idf
+
 
 class RunWords(object):
 
     def __init__(self, solver, solver_kwargs, valid_vocab, main_dir, out_dir, dataset, load_param_dir=None,
                  pre_trained=False, restrict_min_length=None, restrict_max_length=None,
-                 train_prop=0.95):
+                 train_prop=0.95, **kwargs):
 
         self.valid_vocab = valid_vocab
 
@@ -26,7 +28,7 @@ class RunWords(object):
 
         # Load the data when the training procedure is initialised
         self.X_train, self.X_test, self.L_train, self.L_test = self.load_data(dataset, train_prop, restrict_min_length,
-                                                                              restrict_max_length)
+                                                                              restrict_max_length, **kwargs)
 
         print('# training sentences = ' + str(len(self.L_train)))
         print('# test sentences = ' + str(len(self.L_test)))
@@ -50,9 +52,10 @@ class RunWords(object):
             with open(os.path.join(self.load_param_dir, 'recog_params.save'), 'rb') as f:
                 self.vb.recognition_model.set_param_values(cPickle.load(f))
 
-    def load_data(self, dataset, train_prop, restrict_min_length, restrict_max_length, load_batch_size=5000000):
+    def load_data(self, dataset, train_prop, restrict_min_length, restrict_max_length, load_batch_size=5000000, **kwargs):
 
-        folder = '../_datasets/' + dataset
+        # Load the dataset
+        folder = './data/' + dataset
 
         files = []
 
@@ -76,6 +79,18 @@ class RunWords(object):
             with open(os.path.join(self.main_dir, folder, f), 'r') as d:
                 words_d = d.read()
                 words += json.loads(words_d)
+
+        if 'most_common' in kwargs:
+            c = Counter()
+            for w in words:
+                c.update(w)
+            most_common = {k for (k, _) in c.most_common(kwargs['most_common'])}
+
+        if 'tf-idf' in kwargs:
+            # TODO
+            most_frequent = []
+            for w in words:
+                most_frequent.append([i for i in w if tf_idf(i, w, words) < kwargs['tf-idf']])
 
         L = np.array([len(s) for s in words])
 
@@ -101,6 +116,7 @@ class RunWords(object):
         np.random.seed(1234)
 
         training_mask = np.random.rand(len(words_to_return)) < train_prop
+
 
         return words_to_return[training_mask], words_to_return[~training_mask], L[training_mask], L[~training_mask]
 

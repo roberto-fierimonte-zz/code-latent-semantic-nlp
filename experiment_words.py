@@ -18,13 +18,14 @@ np.set_printoptions(threshold=3000000)
 sys.setrecursionlimit(5000000)
 
 
-main_dir = sys.argv[1]
-out_dir = sys.argv[2]
+main_dir = '.'
+out_dir = './output'
 
+print(os.getcwd())
 
-dataset = 'BookCorpus/processed_vocab20000_4to60_limunk0.0'             # dataset folder
+dataset = 'Gutenberg/processed_vocab20000_1to60_limunk0.0'             # dataset folder
 
-with open(os.path.join(main_dir, '../_datasets', dataset, 'valid_vocab.txt'), 'r') as f:
+with open(os.path.join(main_dir, 'data/', dataset, 'valid_vocab.txt'), 'r') as f:
     valid_vocab = json.loads(f.read())
 
 eos_ind = valid_vocab.index('<EOS>')                                    # index of the EOS token
@@ -134,7 +135,8 @@ if __name__ == '__main__':
               load_param_dir=load_param_dir,                            # the directory where to load the parameters from
               restrict_min_length=restrict_min_length,                  # the minimum length of the sentence
               restrict_max_length=restrict_max_length,                  # the maximum length of the sentence
-              train_prop=train_prop)                                    # the proportion of data to use for training
+              train_prop=train_prop,                                    # the proportion of data to use for training
+              **{'most_common': 20})                                    # additional params for the simulations
 
     if train:
 

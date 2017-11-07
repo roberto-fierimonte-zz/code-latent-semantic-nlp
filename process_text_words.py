@@ -1,41 +1,25 @@
 import json
 import os
-import string
 import time
 from collections import Counter
 from nltk.tokenize import word_tokenize
 
-print(os.getcwd())
-dataset = 'BookCorpus'
+
+dataset = 'Gutenberg'
 
 vocab_size = 20000
 
-min_len = 4
-max_len = 500
+min_len = 1
+max_len = 60
 len_saving_intervals = 5
-
 lim_unk = 0.0
 
-
-files = []
-
-if dataset == 'WikipediaWestbury':
-
-    files = [os.path.join(dataset, f) for f in os.listdir(dataset) if f.startswith('WestburyLab.Wikipedia.Corpus_')]
-
-elif dataset == 'BookCorpus':
-
-    files = [os.path.join('./data/', dataset, f) for f in os.listdir(os.path.join('./data/', dataset)) if f.startswith('books_large_p')]
-
-elif dataset == 'Test':
-
-    files = ['Test/test.txt']
-
+files = [os.path.join('./data/', dataset, f) for f in os.listdir(os.path.join('./data/', dataset)) if f.endswith('.txt')]
 
 print('first pass (computing word frequencies)')
 
 start = time.clock()
-num_sentences_processed = 0
+sent_counter = 0
 
 word_counts = Counter()
 
@@ -43,9 +27,12 @@ for filename in files:
 
     with open(filename, 'r') as f:
 
-        raw_text = f.readlines()
+        for line in f:
+            sent_counter += 1
+            if (sent_counter % 1000000 == 0) and (sent_counter > 0):
+                print("Read %dM sentences" % (sent_counter / 1000000))
 
-        word_counts.update(word_tokenize(' '.join(raw_text).lower()))
+            word_counts.update(word_tokenize(line.lower()))
 
         print('file processed; time taken = ' + str(time.clock() - start) + ' seconds')
 
@@ -65,16 +52,15 @@ valid_vocab.append(eos_token)
 valid_vocab_index = {valid_vocab[i]: i for i in range(len(valid_vocab))}
 
 
-out_dir = dataset + '/processed_vocab' + str(vocab_size) + '_' + str(min_len) + 'to' + str(max_len)
+out_dir = './data/' + dataset + '/processed_vocab' + str(vocab_size) + '_' + str(min_len) + 'to' + str(max_len)
 
-if lim_unk is not None:
+if lim_unk is not None or lim_unk != 0.0:
     out_dir += '_limunk' + str(lim_unk)
 
 if not os.path.exists(out_dir):
     os.makedirs(out_dir)
 
 with open(os.path.join(out_dir, 'valid_vocab.txt'), 'w') as out:
-    
     d = json.dumps(valid_vocab)
     out.write(d)
 
