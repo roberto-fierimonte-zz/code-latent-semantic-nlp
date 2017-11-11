@@ -132,7 +132,7 @@ class SGVBWords(object):
             for u, v in zip(updates, saved_update.keys()):
                 u.set_value(v.get_value())
 
-        optimiser = theano.function(inputs=[x, beta, drop_mask],
+        optimiser = theano.function(inputs=[x, beta, drop_mask, meaningful_mask],
                                     outputs=[elbo, kl, pp],
                                     updates=updates,
                                     allow_input_downcast=True,

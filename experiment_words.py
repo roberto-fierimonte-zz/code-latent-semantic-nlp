@@ -136,7 +136,7 @@ if __name__ == '__main__':
               restrict_min_length=restrict_min_length,                  # the minimum length of the sentence
               restrict_max_length=restrict_max_length,                  # the maximum length of the sentence
               train_prop=train_prop,                                    # the proportion of data to use for training
-              **{'most_common': 20})                                    # additional params for the simulation
+              **{'most_common': 200})                                   # additional params for the simulation
 
     if train:
 

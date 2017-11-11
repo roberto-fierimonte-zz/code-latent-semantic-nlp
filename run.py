@@ -129,20 +129,15 @@ class RunWords(object):
         return words_to_return[training_mask], words_to_return[~training_mask], L[training_mask], L[~training_mask], \
                meaningful_mask[training_mask], meaningful_mask[~training_mask]
 
+    # Compute ELBO using the current validation batch
     def call_elbo_fn(self, elbo_fn, x):
 
         return elbo_fn(x)
 
-    # Compute the ELBO optimisation using the current batch
+    # Optimise ELBO using the current training batch
     def call_optimiser(self, optimiser, x, beta, drop_mask, meaningful_mask):
 
-        if drop_mask is None:
-
-            return optimiser(x, beta)
-
-        else:
-
-            return optimiser(x, beta, drop_mask)
+        return optimiser(x, beta, drop_mask, meaningful_mask)
 
     def get_generate_output_prior(self, num_outputs, beam_size):
 
@@ -274,6 +269,9 @@ class RunWords(object):
 
             # Perform training iteration using the current settings (now with meaningful_mask)
             elbo, kl, pp = self.call_optimiser(optimiser, batch, beta, drop_mask, meaningful_mask)
+
+            if elbo is np.NaN or elbo is None:
+                print('Error')
 
             print('Iteration ' + str(i + 1) + ': ELBO = ' + str(elbo/batch_size) + ' (KL = ' + str(kl/batch_size) +
                   ') per data point (PP = ' + str(pp) + ') (time taken = ' + str(time.clock() - start) +

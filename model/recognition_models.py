@@ -38,6 +38,7 @@ class RecModel(object):
         :return: variational mean and covariance for the latents given a sentence
         """
 
+        # If x is less or equal than 0 then return 0, else 1
         mask = T.switch(T.lt(X, 0), 0, 1)  # N * max(L)
 
         X_embedded *= T.shape_padright(mask)
