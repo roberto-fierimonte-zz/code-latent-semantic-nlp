@@ -7,7 +7,7 @@ import json
 from lasagne.updates import adam
 from data_processing.utilities import chunker
 
-from .process_dataset import tf_idf
+from process_dataset import tf_idf
 
 
 class RunWords(object):
@@ -27,8 +27,8 @@ class RunWords(object):
         self.vocab_size = solver_kwargs['vocab_size']
 
         # Load the data when the training procedure is initialised
-        self.X_train, self.X_test, self.L_train, self.L_test = self.load_data(dataset, train_prop, restrict_min_length,
-                                                                              restrict_max_length, **kwargs)
+        self.X_train, self.X_test, self.L_train, self.L_test, self.meaningful_mask_train, self.meaningful_mask_test = \
+            self.load_data(dataset, train_prop, restrict_min_length, restrict_max_length, **kwargs)
 
         print('# training sentences = ' + str(len(self.L_train)))
         print('# test sentences = ' + str(len(self.L_test)))
@@ -36,7 +36,7 @@ class RunWords(object):
         # Get the actual maximum length of all the sentences
         self.max_length = np.concatenate((self.X_train, self.X_test), axis=0).shape[1]
 
-        # Initialise the Variational method used to solve the model
+        # Initialise the Variational method used to solve the model (SGVB)
         self.vb = solver(max_length=self.max_length, **self.solver_kwargs)
 
         self.pre_trained = pre_trained
@@ -85,6 +85,7 @@ class RunWords(object):
         max_L = max(L)
 
         # We want to identify meaningful words using different approaches
+        # meaningful_mask contains the meaningful_words
         if 'most_common' in kwargs:
             c = Counter()
             for w in words:
@@ -102,7 +103,7 @@ class RunWords(object):
         else:
             meaningful_mask = np.full((len(words), max_L), 0)
             for i, w in enumerate(words):
-                meaningful_mask[i, 0:len(w)] = np.ones(w)
+                meaningful_mask[i, 0:len(w)] = np.ones(len(w))
 
         word_arrays = []
 
@@ -125,14 +126,15 @@ class RunWords(object):
 
         training_mask = np.random.rand(len(words_to_return)) < train_prop
 
-
-        return words_to_return[training_mask], words_to_return[~training_mask], L[training_mask], L[~training_mask],
+        return words_to_return[training_mask], words_to_return[~training_mask], L[training_mask], L[~training_mask], \
+               meaningful_mask[training_mask], meaningful_mask[~training_mask]
 
     def call_elbo_fn(self, elbo_fn, x):
 
         return elbo_fn(x)
 
-    def call_optimiser(self, optimiser, x, beta, drop_mask):
+    # Compute the ELBO optimisation using the current batch
+    def call_optimiser(self, optimiser, x, beta, drop_mask, meaningful_mask):
 
         if drop_mask is None:
 
@@ -268,8 +270,10 @@ class RunWords(object):
             else:
                 drop_mask = None
 
-            # Perform training iteration using the current settings
-            elbo, kl, pp = self.call_optimiser(optimiser, batch, beta, drop_mask)
+            meaningful_mask = self.meaningful_mask_train[batch_indices]
+
+            # Perform training iteration using the current settings (now with meaningful_mask)
+            elbo, kl, pp = self.call_optimiser(optimiser, batch, beta, drop_mask, meaningful_mask)
 
             print('Iteration ' + str(i + 1) + ': ELBO = ' + str(elbo/batch_size) + ' (KL = ' + str(kl/batch_size) +
                   ') per data point (PP = ' + str(pp) + ') (time taken = ' + str(time.clock() - start) +

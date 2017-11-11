@@ -79,7 +79,7 @@ load_param_dir = 'code_outputs/2017_08_23_09_11_02'                     # direct
 train = True                                                            # do not train if we already have the parameters
 
 training_iterations = 2000                                              # number of training iterations
-training_batch_size = 200                                               # number of sentences per training iteration
+training_batch_size = 5                                                 # number of sentences per training iteration
 training_num_samples = 1                                                # number of samples per sentence per training iteration
 warm_up = 20000                                                         # number of KL annealing iterations
 word_drop = 0.3                                                         # percentage of words to drop to prevent vanishing KL term
@@ -136,7 +136,7 @@ if __name__ == '__main__':
               restrict_min_length=restrict_min_length,                  # the minimum length of the sentence
               restrict_max_length=restrict_max_length,                  # the maximum length of the sentence
               train_prop=train_prop,                                    # the proportion of data to use for training
-              **{'most_common': 20})                                    # additional params for the simulations
+              **{'most_common': 20})                                    # additional params for the simulation
 
     if train:
 

@@ -13,11 +13,12 @@ class SGVBWords(object):
     def __init__(self, generative_model, recognition_model, z_dim, max_length, vocab_size, embedding_dim, dist_z_gen,
                  dist_x_gen, dist_z_rec, gen_nn_kwargs, rec_nn_kwargs, eos_ind):
 
-        self.z_dim = z_dim                                                          # dimension of the latent variable
-        self.max_length = max_length                                                # actual maximum length of any sentence
-        self.vocab_size = vocab_size                                                # number of distinct tokens in vocabulary
-        self.embedding_dim = embedding_dim                                          # size of the embedding
+        self.z_dim = z_dim                                                          # dimension of the latent variable (Z)
+        self.max_length = max_length                                                # actual maximum length of any sentence (L)
+        self.vocab_size = vocab_size                                                # number of distinct tokens in vocabulary (V)
+        self.embedding_dim = embedding_dim                                          # size of the embedding (E)
 
+        # Creates a V x E embedding matrix of samples from the Normal distribution with 0 Mean and 0.1 StD
         self.all_embeddings = theano.shared(np.float32(np.random.normal(0., 0.1, (vocab_size, embedding_dim))))  # embedder
 
         self.dist_z_gen = dist_z_gen                                                # distribution for the latents in the generative model
@@ -63,11 +64,16 @@ class SGVBWords(object):
 
         return x_cut_off.T
 
-    def symbolic_elbo(self, x, num_samples, beta=None, drop_mask=None):
+    def symbolic_elbo(self, x, num_samples, beta=None, drop_mask=None, meaningful_mask=None):
 
         x_embedded = self.embedder(x, self.all_embeddings)  # N * max(L) * E
 
-        z, kl = self.recognition_model.get_samples_and_kl_std_gaussian(x, x_embedded, num_samples)  # (S*N) * dim(z) and
+        if meaningful_mask is None:
+            x_embedded_meaningful = x_embedded
+        else:
+            x_embedded_meaningful = x_embedded * T.shape_padright(meaningful_mask)
+
+        z, kl = self.recognition_model.get_samples_and_kl_std_gaussian(x, x_embedded_meaningful, num_samples)  # (S*N) * dim(z) and
         # N
 
         if drop_mask is None:
@@ -107,7 +113,9 @@ class SGVBWords(object):
 
         drop_mask = T.matrix('drop_mask')  # N * max(L)
 
-        elbo, kl, pp = self.symbolic_elbo(x, num_samples, beta, drop_mask)
+        meaningful_mask = T.matrix('meaningful_mask')
+
+        elbo, kl, pp = self.symbolic_elbo(x, num_samples, beta, drop_mask, meaningful_mask)
 
         params = self.generative_model.get_params() + self.recognition_model.get_params() + [self.all_embeddings]
         grads = T.grad(-elbo, params, disconnected_inputs='ignore')
