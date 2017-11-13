@@ -19,6 +19,7 @@ class SGVBWords(object):
         self.embedding_dim = embedding_dim                                          # size of the embedding (E)
 
         # Creates a V x E embedding matrix of samples from the Normal distribution with 0 Mean and 0.1 StD
+        # This is an updatable variable (theano concept of "current value" and "update")
         self.all_embeddings = theano.shared(np.float32(np.random.normal(0., 0.1, (vocab_size, embedding_dim))))  # embedder
 
         self.dist_z_gen = dist_z_gen                                                # distribution for the latents in the generative model
@@ -96,11 +97,14 @@ class SGVBWords(object):
 
         x = T.imatrix('x')  # N * max(L)
 
+        meaningful_mask = T.matrix('meaningful_mask')
+
         elbo, kl, pp = self.symbolic_elbo(x, num_samples)
 
-        elbo_fn = theano.function(inputs=[x],
+        elbo_fn = theano.function(inputs=[x, meaningful_mask],
                                   outputs=[elbo, kl, pp],
                                   allow_input_downcast=True,
+                                  on_unused_input='ignore',
                                   )
 
         return elbo_fn

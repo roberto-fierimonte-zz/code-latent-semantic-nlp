@@ -20,6 +20,10 @@ class RunWords(object):
 
         self.main_dir = main_dir
         self.out_dir = out_dir
+
+        if ~os.path.exists(self.out_dir):
+            os.makedirs(self.out_dir, exist_ok=True)
+
         self.load_param_dir = load_param_dir
 
         self.solver_kwargs = solver_kwargs
@@ -130,9 +134,9 @@ class RunWords(object):
                meaningful_mask[training_mask], meaningful_mask[~training_mask]
 
     # Compute ELBO using the current validation batch
-    def call_elbo_fn(self, elbo_fn, x):
+    def call_elbo_fn(self, elbo_fn, x, meaningful_mask):
 
-        return elbo_fn(x)
+        return elbo_fn(x, meaningful_mask)
 
     # Optimise ELBO using the current training batch
     def call_optimiser(self, optimiser, x, beta, drop_mask, meaningful_mask):
@@ -236,12 +240,13 @@ class RunWords(object):
                                                saved_update=saved_update)
 
         # Initialise ELBO function (symbolic function)
-        elbo_fn = self.vb.elbo_fn(val_num_samples)
+        elbo_fn = self.vb.elbo_fn(num_samples=val_num_samples)
 
         # Initialise functions to generate samples (symbolic)
         generate_output_prior = self.get_generate_output_prior(val_print_gen, val_beam_size)
         generate_output_posterior = self.get_generate_output_posterior(val_beam_size)
 
+        print('Starting training...')
         for i in range(n_iter):
 
             start = time.clock()
@@ -284,7 +289,9 @@ class RunWords(object):
                 val_batch_indices = np.random.choice(len(self.X_test), val_batch_size)
                 val_batch = np.array([self.X_test[ind] for ind in val_batch_indices])
 
-                val_elbo, val_kl, val_pp = self.call_elbo_fn(elbo_fn, val_batch)
+                val_meaningful_mask = self.meaningful_mask_test[val_batch_indices]
+
+                val_elbo, val_kl, val_pp = self.call_elbo_fn(elbo_fn, val_batch, val_meaningful_mask)
 
                 print('Test set ELBO = ' + str(val_elbo/val_batch_size) + ' (KL = ' + str(kl/batch_size) +
                       ') per data point (PP = ' + str(val_pp) + ')')
@@ -294,9 +301,11 @@ class RunWords(object):
                 self.print_output_prior(output_prior)
 
                 post_batch_indices = np.random.choice(len(self.X_train), val_print_gen, replace=False)
-                post_batch_in = np.array([self.X_train[ind] for ind in post_batch_indices])
+                post_batch = np.array([self.X_train[ind] for ind in post_batch_indices])
 
-                output_posterior = self.call_generate_output_posterior(generate_output_posterior, post_batch_in)
+                post_batch_meaningful_mask = self.meaningful_mask_train[post_batch_indices]
+
+                output_posterior = self.call_generate_output_posterior(generate_output_posterior, post_batch)
 
                 self.print_output_posterior(output_posterior)
 

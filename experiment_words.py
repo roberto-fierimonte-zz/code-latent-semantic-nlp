@@ -21,9 +21,7 @@ sys.setrecursionlimit(5000000)
 main_dir = '.'
 out_dir = './output'
 
-print(os.getcwd())
-
-dataset = 'Gutenberg/processed_vocab20000_1to60_limunk0.0'             # dataset folder
+dataset = 'BookCorpus/processed_vocab20000_1to60_limunk0.0'             # dataset folder
 
 with open(os.path.join(main_dir, 'data/', dataset, 'valid_vocab.txt'), 'r') as f:
     valid_vocab = json.loads(f.read())
@@ -35,8 +33,8 @@ solver = SGVB                                                           # solver
 
 
 vocab_size = len(valid_vocab)                                           # size of the vocabulary
-restrict_min_length = 1                                                 # minimum length of the sentence
-restrict_max_length = 40                                                # maximum length of the sentence
+restrict_min_length = 11                                                # minimum length of the sentence
+restrict_max_length = 15                                                # maximum length of the sentence
 train_prop = 0.9                                                        # fraction of data to use as the training set
 
 d_z = 50                                                                # dimension of the latent space
@@ -88,7 +86,7 @@ grad_norm_constraint = None                                             # to pre
 update = lasagne.updates.adam                                           # the optimisation algorithm
 update_kwargs = {'learning_rate': 0.0001}                               # parameters for the optimisation algorithm
 
-val_freq = 1000                                                         # how often to perform evaluation
+val_freq = 100                                                          # how often to perform evaluation
 val_batch_size = 100                                                    # number of sentences per per evaluation iteration
 val_num_samples = 1                                                     # number of samples per sentence per evaluation iteration
 
@@ -136,7 +134,7 @@ if __name__ == '__main__':
               restrict_min_length=restrict_min_length,                  # the minimum length of the sentence
               restrict_max_length=restrict_max_length,                  # the maximum length of the sentence
               train_prop=train_prop,                                    # the proportion of data to use for training
-              **{'most_common': 200})                                   # additional params for the simulation
+              **{'most_common': 50})                                    # additional params for the simulation
 
     if train:
 

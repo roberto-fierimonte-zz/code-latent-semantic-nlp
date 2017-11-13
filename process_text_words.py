@@ -28,6 +28,7 @@ for filename in files:
     with open(filename, 'r') as f:
 
         for line in f:
+            print('\n===\n'  + line)
             sent_counter += 1
             if (sent_counter % 1000000 == 0) and (sent_counter > 0):
                 print("Read %dM sentences" % (sent_counter / 1000000))
