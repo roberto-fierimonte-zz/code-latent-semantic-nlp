@@ -76,38 +76,24 @@ class RunWords(object):
             else:
                 files.append(f)
 
+        c = Counter()
         words = []
-
         for f in files:
 
             with open(os.path.join(self.main_dir, folder, f), 'r') as d:
                 words_d = d.read()
-                words += json.loads(words_d)
+                new_words = json.loads(words_d)
+                words += new_words
+                if 'most_common' in kwargs:
+                    for w in new_words:
+                        c.update(w)
 
+        print("""I've read all the files""")
         L = np.array([len(s) for s in words])
-
         max_L = max(L)
 
         # We want to identify meaningful words using different approaches
         # meaningful_mask contains the meaningful_words
-        if 'most_common' in kwargs:
-            c = Counter()
-            for w in words:
-                c.update(w)
-            most_common = [k for (k, _) in c.most_common(kwargs['most_common'])]
-            meaningful_mask = np.full((len(words), max_L), 0)
-            for i, w in enumerate(words):
-                meaningful_mask[i, 0:len(w)] = ~np.in1d(w, most_common)
-
-        elif 'tf-idf' in kwargs:
-            meaningful_mask = np.full((len(words), max_L), 0)
-            for i, w in enumerate(words):
-                meaningful_mask[i, 0:len(w)] = ~np.in1d(w, [i for i in w if tf_idf(i, w, words) < kwargs['tf-idf']])
-
-        else:
-            meaningful_mask = np.full((len(words), max_L), 0)
-            for i, w in enumerate(words):
-                meaningful_mask[i, 0:len(w)] = np.ones(len(w))
 
         word_arrays = []
 
@@ -122,16 +108,29 @@ class RunWords(object):
 
             del L_i, word_array
 
-        del words
-
         words_to_return = np.concatenate(word_arrays)
-
-        np.random.seed(1234)
+        print("""I've loaded all the words""")
 
         training_mask = np.random.rand(len(words_to_return)) < train_prop
 
+        if 'most_common' in kwargs:
+            most_common = [k for (k, _) in c.most_common(kwargs['most_common'])]
+            meaningful_mask = np.sign(np.isin(words_to_return, most_common, invert=True) - 0.5)
+
+        elif 'tf-idf' in kwargs:
+            meaningful_mask = np.full((len(words), max_L), 1)
+            for i, w in enumerate(words):
+                meaningful_mask[i, 0:len(w)] = np.sign(~np.in1d(w, [i for i in w if tf_idf(i, w, words) < kwargs['tf-idf']]) - 0.5)
+        else:
+            meaningful_mask = np.full((len(words), max_L), 1)
+
+        print("""I've computed the meaningfulness mask""")
+
+        del words
+        np.random.seed(1234)
+
         return words_to_return[training_mask], words_to_return[~training_mask], L[training_mask], L[~training_mask], \
-               meaningful_mask[training_mask], meaningful_mask[~training_mask]
+               np.float32(meaningful_mask[training_mask]), np.float32(meaningful_mask[~training_mask])
 
     # Compute ELBO using the current validation batch
     def call_elbo_fn(self, elbo_fn, x, meaningful_mask):
@@ -183,9 +182,11 @@ class RunWords(object):
 
         return self.vb.generate_output_posterior_fn(beam_size)
 
-    def call_generate_output_posterior(self, generate_output_posterior, x):
+    def call_generate_output_posterior(self, generate_output_posterior, x, meaningful_mask):
 
-        z, x_gen_sampled, x_gen_argmax, x_gen_beam = generate_output_posterior(x)
+        x_m = self.vb.recognition_model.get_meaningful_words(x, meaningful_mask)
+
+        z, x_gen_sampled, x_gen_argmax, x_gen_beam = generate_output_posterior(x, x_m)
 
         out = OrderedDict()
 
@@ -305,7 +306,7 @@ class RunWords(object):
 
                 post_batch_meaningful_mask = self.meaningful_mask_train[post_batch_indices]
 
-                output_posterior = self.call_generate_output_posterior(generate_output_posterior, post_batch)
+                output_posterior = self.call_generate_output_posterior(generate_output_posterior, post_batch, post_batch_meaningful_mask)
 
                 self.print_output_posterior(output_posterior)
 

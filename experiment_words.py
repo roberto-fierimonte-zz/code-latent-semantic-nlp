@@ -33,8 +33,8 @@ solver = SGVB                                                           # solver
 
 
 vocab_size = len(valid_vocab)                                           # size of the vocabulary
-restrict_min_length = 11                                                # minimum length of the sentence
-restrict_max_length = 15                                                # maximum length of the sentence
+restrict_min_length = 4                                                 # minimum length of the sentence
+restrict_max_length = 30                                                # maximum length of the sentence
 train_prop = 0.9                                                        # fraction of data to use as the training set
 
 d_z = 50                                                                # dimension of the latent space
@@ -76,7 +76,7 @@ load_param_dir = 'code_outputs/2017_08_23_09_11_02'                     # direct
 
 train = True                                                            # do not train if we already have the parameters
 
-training_iterations = 2000                                              # number of training iterations
+training_iterations = 200000                                            # number of training iterations
 training_batch_size = 5                                                 # number of sentences per training iteration
 training_num_samples = 1                                                # number of samples per sentence per training iteration
 warm_up = 20000                                                         # number of KL annealing iterations
@@ -134,7 +134,7 @@ if __name__ == '__main__':
               restrict_min_length=restrict_min_length,                  # the minimum length of the sentence
               restrict_max_length=restrict_max_length,                  # the maximum length of the sentence
               train_prop=train_prop,                                    # the proportion of data to use for training
-              **{'most_common': 50})                                    # additional params for the simulation
+              **{'most_common': 20})                                    # additional params for the simulation
 
     if train:
 

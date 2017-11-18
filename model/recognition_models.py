@@ -30,6 +30,16 @@ class RecModel(object):
 
         raise NotImplementedError()
 
+    def get_meaningful_words(self, X, meaningful_mask):
+        return X * meaningful_mask
+
+    def get_meaningful_words_symbolic(self, meaningful_mask):
+
+        X = T.imatrix('X')
+        f =  X * meaningful_mask
+
+        return theano.function(inputs=[X, meaningful_mask], outputs=f, allow_input_downcast=True)
+
     def get_means_and_covs(self, X, X_embedded):
 
         """
@@ -38,7 +48,7 @@ class RecModel(object):
         :return: variational mean and covariance for the latents given a sentence
         """
 
-        # If x is less or equal than 0 then return 0, else 1
+        # If x is less or equal than 0 then return 0, else 1 (used to filter out words)
         mask = T.switch(T.lt(X, 0), 0, 1)  # N * max(L)
 
         X_embedded *= T.shape_padright(mask)
@@ -248,6 +258,7 @@ class RecRNN(RecModel):
 
     def get_hid(self, X, X_embedded):
 
+        # If x is less or equal than 0 then return 0, else 1 (exclude unused words)
         mask = T.switch(T.lt(X, 0), 0, 1)  # N * max(L)
 
         h_prev = X_embedded  # N * max(L) * E

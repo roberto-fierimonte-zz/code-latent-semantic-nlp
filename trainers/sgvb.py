@@ -45,6 +45,7 @@ class SGVBWords(object):
 
     def embedder(self, x, all_embeddings):
 
+        # Embedding are parameters of the model, we learn them over time (here we just do 0-padding)
         all_embeddings = T.concatenate([all_embeddings, T.zeros((1, self.embedding_dim))], axis=0)
 
         return all_embeddings[x]
@@ -69,12 +70,16 @@ class SGVBWords(object):
 
         x_embedded = self.embedder(x, self.all_embeddings)  # N * max(L) * E
 
-        if meaningful_mask is None:
-            x_embedded_meaningful = x_embedded
-        else:
-            x_embedded_meaningful = x_embedded * T.shape_padright(meaningful_mask)
+        # if meaningful_mask is None:
+        #     x_embedded_meaningful = x_embedded
+        #     print('Meaningfulness mask is None')
+        # else:
+        #     x_embedded_meaningful = x_embedded * T.shape_padright(meaningful_mask)
+        #     print('Meaningfulness mask is not None')
 
-        z, kl = self.recognition_model.get_samples_and_kl_std_gaussian(x, x_embedded_meaningful, num_samples)  # (S*N) * dim(z) and
+        x_m = self.recognition_model.get_meaningful_words(x, meaningful_mask)
+
+        z, kl = self.recognition_model.get_samples_and_kl_std_gaussian(x_m, x_embedded, num_samples)  # (S*N) * dim(z) and
         # N
 
         if drop_mask is None:
@@ -99,7 +104,7 @@ class SGVBWords(object):
 
         meaningful_mask = T.matrix('meaningful_mask')
 
-        elbo, kl, pp = self.symbolic_elbo(x, num_samples)
+        elbo, kl, pp = self.symbolic_elbo(x, num_samples, None, None, meaningful_mask)
 
         elbo_fn = theano.function(inputs=[x, meaningful_mask],
                                   outputs=[elbo, kl, pp],
@@ -156,15 +161,47 @@ class SGVBWords(object):
                                allow_input_downcast=True,
                                )
 
+    # meaningful_mask = T.imatrix('meaningful_mask')
+    #
+    # x_m = self.recognition_model.get_meaningful_words(x, meaningful_mask)
+
+    def generate_output_posterior_fn_generative(self, x, x_m, z, all_embeddings, beam_size, num_time_steps=None):
+
+        """
+
+        :param x:
+        :param z:
+        :param all_embeddings:
+        :param beam_size:
+        :param num_time_steps:
+        :return:
+        """
+
+        x_gen_sampled, x_gen_argmax, updates = self.generative_model.generate_text(z, all_embeddings)
+
+        x_gen_beam = self.generative_model.beam_search(z, all_embeddings, beam_size)
+
+        generate_output_posterior = theano.function(inputs=[x, x_m],
+                                                    outputs=[z, x_gen_sampled, x_gen_argmax, x_gen_beam],
+                                                    updates=updates,
+                                                    allow_input_downcast=True
+                                                    )
+
+        return generate_output_posterior
+
     def generate_output_posterior_fn(self, beam_size, num_time_steps=None):
 
         x = T.imatrix('x')  # N * max(L)
+        x_m = T.imatrix('x_m')  # N * max(L)
+        # meaningful_mask = T.imatrix('meaningful_mask')
+        #
+        # x_m = self.recognition_model.get_meaningful_words(x, meaningful_mask)
 
         x_embedded = self.embedder(x, self.all_embeddings)
 
-        z = self.recognition_model.get_samples(x, x_embedded, 1, means_only=True)  # N * dim(z) matrix
+        z = self.recognition_model.get_samples(x_m, x_embedded, 1, means_only=True)  # N * dim(z) matrix
 
-        return self.generative_model.generate_output_posterior_fn(x, z, self.all_embeddings, beam_size, num_time_steps)
+        return self.generate_output_posterior_fn_generative(x, x_m, z, self.all_embeddings, beam_size, num_time_steps)
 
     def generate_canvases_prior_fn(self, num_samples, beam_size):
 
