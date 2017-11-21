@@ -1,4 +1,5 @@
 import theano
+import numpy as np
 import theano.tensor as T
 from lasagne.layers import DenseLayer, get_all_layers, get_all_param_values, get_all_params, get_output, InputLayer, \
     LSTMLayer, set_all_param_values
@@ -31,7 +32,11 @@ class RecModel(object):
         raise NotImplementedError()
 
     def get_meaningful_words(self, X, meaningful_mask):
-        return X * meaningful_mask
+        X_tilde =  X * meaningful_mask
+        for i in range(X_tilde.shape[0]):
+            X_tilde[i] = np.concatenate((X_tilde[i, X_tilde[i] >= 0], X_tilde[i, X_tilde[i] < 0]))
+
+        return X_tilde
 
     def get_meaningful_words_symbolic(self, meaningful_mask):
 

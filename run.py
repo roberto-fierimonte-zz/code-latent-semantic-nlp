@@ -7,6 +7,7 @@ import json
 from lasagne.updates import adam
 from data_processing.utilities import chunker
 
+from model.generative_models import *
 from process_dataset import tf_idf
 
 
@@ -135,12 +136,16 @@ class RunWords(object):
     # Compute ELBO using the current validation batch
     def call_elbo_fn(self, elbo_fn, x, meaningful_mask):
 
-        return elbo_fn(x, meaningful_mask)
+        x_m = self.vb.recognition_model.get_meaningful_words(x, meaningful_mask)
+
+        return elbo_fn(x, x_m)
 
     # Optimise ELBO using the current training batch
     def call_optimiser(self, optimiser, x, beta, drop_mask, meaningful_mask):
 
-        return optimiser(x, beta, drop_mask, meaningful_mask)
+        x_m = self.vb.recognition_model.get_meaningful_words(x, meaningful_mask)
+
+        return optimiser(x, x_m, beta, drop_mask)
 
     def get_generate_output_prior(self, num_outputs, beam_size):
 
@@ -244,7 +249,11 @@ class RunWords(object):
         elbo_fn = self.vb.elbo_fn(num_samples=val_num_samples)
 
         # Initialise functions to generate samples (symbolic)
-        generate_output_prior = self.get_generate_output_prior(val_print_gen, val_beam_size)
+        if isinstance(self.vb.generative_model, GenAUTRWords):
+            generate_output_prior = self.get_generate_output_prior(val_print_gen, val_beam_size)
+        elif isinstance(self.vb.generative_model, GenStanfordWords):
+            generate_output_prior = self.vb.generative_model.generate_output_prior_fn(self.vb.all_embeddings, val_print_gen, val_beam_size)
+
         generate_output_posterior = self.get_generate_output_posterior(val_beam_size)
 
         print('Starting training...')

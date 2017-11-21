@@ -66,7 +66,7 @@ class SGVBWords(object):
 
         return x_cut_off.T
 
-    def symbolic_elbo(self, x, num_samples, beta=None, drop_mask=None, meaningful_mask=None):
+    def symbolic_elbo(self, x, x_m, num_samples, beta=None, drop_mask=None):
 
         x_embedded = self.embedder(x, self.all_embeddings)  # N * max(L) * E
 
@@ -76,8 +76,6 @@ class SGVBWords(object):
         # else:
         #     x_embedded_meaningful = x_embedded * T.shape_padright(meaningful_mask)
         #     print('Meaningfulness mask is not None')
-
-        x_m = self.recognition_model.get_meaningful_words(x, meaningful_mask)
 
         z, kl = self.recognition_model.get_samples_and_kl_std_gaussian(x_m, x_embedded, num_samples)  # (S*N) * dim(z) and
         # N
@@ -102,11 +100,11 @@ class SGVBWords(object):
 
         x = T.imatrix('x')  # N * max(L)
 
-        meaningful_mask = T.matrix('meaningful_mask')
+        x_m = T.matrix('x_m')
 
-        elbo, kl, pp = self.symbolic_elbo(x, num_samples, None, None, meaningful_mask)
+        elbo, kl, pp = self.symbolic_elbo(x, x_m, num_samples, None, None)
 
-        elbo_fn = theano.function(inputs=[x, meaningful_mask],
+        elbo_fn = theano.function(inputs=[x, x_m],
                                   outputs=[elbo, kl, pp],
                                   allow_input_downcast=True,
                                   on_unused_input='ignore',
@@ -117,14 +115,13 @@ class SGVBWords(object):
     def optimiser(self, num_samples, grad_norm_constraint, update, update_kwargs, saved_update=None):
 
         x = T.imatrix('x')  # N * max(L)
+        x_m = T.matrix('x_m')
 
         beta = T.scalar('beta')
 
         drop_mask = T.matrix('drop_mask')  # N * max(L)
 
-        meaningful_mask = T.matrix('meaningful_mask')
-
-        elbo, kl, pp = self.symbolic_elbo(x, num_samples, beta, drop_mask, meaningful_mask)
+        elbo, kl, pp = self.symbolic_elbo(x, x_m, num_samples, beta, drop_mask)
 
         params = self.generative_model.get_params() + self.recognition_model.get_params() + [self.all_embeddings]
         grads = T.grad(-elbo, params, disconnected_inputs='ignore')
@@ -141,7 +138,7 @@ class SGVBWords(object):
             for u, v in zip(updates, saved_update.keys()):
                 u.set_value(v.get_value())
 
-        optimiser = theano.function(inputs=[x, beta, drop_mask, meaningful_mask],
+        optimiser = theano.function(inputs=[x, x_m, beta, drop_mask],
                                     outputs=[elbo, kl, pp],
                                     updates=updates,
                                     allow_input_downcast=True,
@@ -160,10 +157,6 @@ class SGVBWords(object):
                                updates=updates,
                                allow_input_downcast=True,
                                )
-
-    # meaningful_mask = T.imatrix('meaningful_mask')
-    #
-    # x_m = self.recognition_model.get_meaningful_words(x, meaningful_mask)
 
     def generate_output_posterior_fn_generative(self, x, x_m, z, all_embeddings, beam_size, num_time_steps=None):
 

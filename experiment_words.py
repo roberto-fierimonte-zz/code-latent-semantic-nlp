@@ -1,5 +1,5 @@
 from model.distributions import GaussianDiagonal, Categorical
-from model.generative_models import GenAUTRWords as GenerativeModel
+from model.generative_models import GenStanfordWords as GenerativeModel
 from model.recognition_models import RecRNN as RecognitionModel
 
 import json
@@ -33,7 +33,7 @@ solver = SGVB                                                           # solver
 
 
 vocab_size = len(valid_vocab)                                           # size of the vocabulary
-restrict_min_length = 4                                                 # minimum length of the sentence
+restrict_min_length = 5                                                 # minimum length of the sentence
 restrict_max_length = 30                                                # maximum length of the sentence
 train_prop = 0.9                                                        # fraction of data to use as the training set
 
@@ -41,6 +41,7 @@ d_z = 50                                                                # dimens
 d_emb = 300                                                             # dimension of the embedding
 
 gen_nn_kwargs = {
+    'rnn_depth': 1,                                                     # depth of the generative RNN
     'rnn_hid_units': 500,                                               # number of hidden units in the generative RNN
     'rnn_hid_nonlinearity': lasagne.nonlinearities.tanh,                # type of generative RNN non-linearity
     'rnn_time_steps': 40,                                               # number of generative RNN time steps (maximum length of the sentence)
@@ -76,7 +77,7 @@ load_param_dir = 'code_outputs/2017_08_23_09_11_02'                     # direct
 
 train = True                                                            # do not train if we already have the parameters
 
-training_iterations = 200000                                            # number of training iterations
+training_iterations = 10000                                             # number of training iterations
 training_batch_size = 5                                                 # number of sentences per training iteration
 training_num_samples = 1                                                # number of samples per sentence per training iteration
 warm_up = 20000                                                         # number of KL annealing iterations
@@ -86,7 +87,7 @@ grad_norm_constraint = None                                             # to pre
 update = lasagne.updates.adam                                           # the optimisation algorithm
 update_kwargs = {'learning_rate': 0.0001}                               # parameters for the optimisation algorithm
 
-val_freq = 100                                                          # how often to perform evaluation
+val_freq = 1000                                                         # how often to perform evaluation
 val_batch_size = 100                                                    # number of sentences per per evaluation iteration
 val_num_samples = 1                                                     # number of samples per sentence per evaluation iteration
 
@@ -134,7 +135,7 @@ if __name__ == '__main__':
               restrict_min_length=restrict_min_length,                  # the minimum length of the sentence
               restrict_max_length=restrict_max_length,                  # the maximum length of the sentence
               train_prop=train_prop,                                    # the proportion of data to use for training
-              **{'most_common': 20})                                    # additional params for the simulation
+              )                                    # additional params for the simulation
 
     if train:
 
