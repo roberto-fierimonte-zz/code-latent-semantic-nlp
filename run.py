@@ -131,7 +131,7 @@ class RunWords(object):
         np.random.seed(1234)
 
         return words_to_return[training_mask], words_to_return[~training_mask], L[training_mask], L[~training_mask], \
-               np.float32(meaningful_mask[training_mask]), np.float32(meaningful_mask[~training_mask])
+               np.int32(meaningful_mask[training_mask]), np.int32(meaningful_mask[~training_mask])
 
     # Compute ELBO using the current validation batch
     def call_elbo_fn(self, elbo_fn, x, meaningful_mask):
@@ -196,6 +196,7 @@ class RunWords(object):
         out = OrderedDict()
 
         out['true_x_for_posterior'] = x
+        out['meaningful_x_for_recognition'] = x_m
         out['generated_z_posterior'] = z
         out['generated_x_sampled_posterior'] = x_gen_sampled
         out['generated_x_argmax_posterior'] = x_gen_argmax
@@ -206,6 +207,7 @@ class RunWords(object):
     def print_output_posterior(self, output_posterior):
 
         x = output_posterior['true_x_for_posterior']
+        x_m = output_posterior['meaningful_x_for_recognition']
         x_gen_sampled = output_posterior['generated_x_sampled_posterior']
         x_gen_argmax = output_posterior['generated_x_argmax_posterior']
         x_gen_beam = output_posterior['generated_x_beam_posterior']
@@ -217,6 +219,7 @@ class RunWords(object):
         for n in range(x.shape[0]):
 
             print('       true x: ' + ' '.join([valid_vocab_for_true[i] for i in x[n]]).strip())
+            print(' meaningful x: ' + ' '.join([valid_vocab_for_true[i] for i in x_m[n]]).strip())
             print('gen x sampled: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_sampled[n]]))
             print(' gen x argmax: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_argmax[n]]))
             print('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))

@@ -34,7 +34,7 @@ solver = SGVB                                                           # solver
 
 vocab_size = len(valid_vocab)                                           # size of the vocabulary
 restrict_min_length = 5                                                 # minimum length of the sentence
-restrict_max_length = 30                                                # maximum length of the sentence
+restrict_max_length = 10                                                # maximum length of the sentence
 train_prop = 0.9                                                        # fraction of data to use as the training set
 
 d_z = 50                                                                # dimension of the latent space
@@ -135,7 +135,7 @@ if __name__ == '__main__':
               restrict_min_length=restrict_min_length,                  # the minimum length of the sentence
               restrict_max_length=restrict_max_length,                  # the maximum length of the sentence
               train_prop=train_prop,                                    # the proportion of data to use for training
-              )                                    # additional params for the simulation
+              **{'most_common': 20  })                                    # additional params for the simulation
 
     if train:
 

@@ -36,6 +36,7 @@ class RecModel(object):
         for i in range(X_tilde.shape[0]):
             X_tilde[i] = np.concatenate((X_tilde[i, X_tilde[i] >= 0], X_tilde[i, X_tilde[i] < 0]))
 
+        X_tilde[X_tilde < 0] = -1
         return X_tilde
 
     def get_meaningful_words_symbolic(self, meaningful_mask):
