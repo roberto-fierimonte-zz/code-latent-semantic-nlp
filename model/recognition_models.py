@@ -31,13 +31,16 @@ class RecModel(object):
 
         raise NotImplementedError()
 
-    def get_meaningful_words(self, X, meaningful_mask):
-        X_tilde =  X * meaningful_mask
-        for i in range(X_tilde.shape[0]):
-            X_tilde[i] = np.concatenate((X_tilde[i, X_tilde[i] >= 0], X_tilde[i, X_tilde[i] < 0]))
+    def get_meaningful_words(self, X, meaningful_mask=None):
+        if meaningful_mask is not None:
+            X_tilde =  X * meaningful_mask
+            for i in range(X_tilde.shape[0]):
+                X_tilde[i] = np.concatenate((X_tilde[i, X_tilde[i] >= 0], X_tilde[i, X_tilde[i] < 0]))
 
-        X_tilde[X_tilde < 0] = -1
-        return X_tilde
+            X_tilde[X_tilde < 0] = -1
+            return X_tilde
+        else:
+            return X
 
     def get_meaningful_words_symbolic(self, meaningful_mask):
 

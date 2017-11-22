@@ -69,15 +69,9 @@ class SGVBWords(object):
     def symbolic_elbo(self, x, x_m, num_samples, beta=None, drop_mask=None):
 
         x_embedded = self.embedder(x, self.all_embeddings)  # N * max(L) * E
+        x_m_embedded = self.embedder(x_m, self.all_embeddings)
 
-        # if meaningful_mask is None:
-        #     x_embedded_meaningful = x_embedded
-        #     print('Meaningfulness mask is None')
-        # else:
-        #     x_embedded_meaningful = x_embedded * T.shape_padright(meaningful_mask)
-        #     print('Meaningfulness mask is not None')
-
-        z, kl = self.recognition_model.get_samples_and_kl_std_gaussian(x_m, x_embedded, num_samples)  # (S*N) * dim(z) and
+        z, kl = self.recognition_model.get_samples_and_kl_std_gaussian(x_m, x_m_embedded, num_samples)  # (S*N) * dim(z) and
         # N
 
         if drop_mask is None:
@@ -99,8 +93,7 @@ class SGVBWords(object):
     def elbo_fn(self, num_samples):
 
         x = T.imatrix('x')  # N * max(L)
-
-        x_m = T.matrix('x_m')
+        x_m = T.imatrix('x_m')
 
         elbo, kl, pp = self.symbolic_elbo(x, x_m, num_samples, None, None)
 
@@ -115,7 +108,7 @@ class SGVBWords(object):
     def optimiser(self, num_samples, grad_norm_constraint, update, update_kwargs, saved_update=None):
 
         x = T.imatrix('x')  # N * max(L)
-        x_m = T.matrix('x_m')
+        x_m = T.imatrix('x_m')
 
         beta = T.scalar('beta')
 
@@ -177,7 +170,8 @@ class SGVBWords(object):
         generate_output_posterior = theano.function(inputs=[x, x_m],
                                                     outputs=[z, x_gen_sampled, x_gen_argmax, x_gen_beam],
                                                     updates=updates,
-                                                    allow_input_downcast=True
+                                                    allow_input_downcast=True,
+                                                    on_unused_input='ignore'
                                                     )
 
         return generate_output_posterior
@@ -186,13 +180,11 @@ class SGVBWords(object):
 
         x = T.imatrix('x')  # N * max(L)
         x_m = T.imatrix('x_m')  # N * max(L)
-        # meaningful_mask = T.imatrix('meaningful_mask')
-        #
-        # x_m = self.recognition_model.get_meaningful_words(x, meaningful_mask)
 
         x_embedded = self.embedder(x, self.all_embeddings)
+        x_m_embedded = self.embedder(x_m, self.all_embeddings)
 
-        z = self.recognition_model.get_samples(x_m, x_embedded, 1, means_only=True)  # N * dim(z) matrix
+        z = self.recognition_model.get_samples(x_m, x_m_embedded, 1, means_only=True)  # N * dim(z) matrix
 
         return self.generate_output_posterior_fn_generative(x, x_m, z, self.all_embeddings, beam_size, num_time_steps)
 

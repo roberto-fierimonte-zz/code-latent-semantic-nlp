@@ -77,8 +77,8 @@ load_param_dir = 'code_outputs/2017_08_23_09_11_02'                     # direct
 
 train = True                                                            # do not train if we already have the parameters
 
-training_iterations = 10000                                             # number of training iterations
-training_batch_size = 5                                                 # number of sentences per training iteration
+training_iterations = 50000                                             # number of training iterations
+training_batch_size = 200                                                 # number of sentences per training iteration
 training_num_samples = 1                                                # number of samples per sentence per training iteration
 warm_up = 20000                                                         # number of KL annealing iterations
 word_drop = 0.3                                                         # percentage of words to drop to prevent vanishing KL term
@@ -91,7 +91,7 @@ val_freq = 1000                                                         # how of
 val_batch_size = 100                                                    # number of sentences per per evaluation iteration
 val_num_samples = 1                                                     # number of samples per sentence per evaluation iteration
 
-save_params_every = 50000                                               # check-point for parameters saving
+save_params_every = 10000                                               # check-point for parameters saving
 
 # The second part of the settings is task-specific
 generate_output_prior = False                                           # ???
@@ -135,7 +135,8 @@ if __name__ == '__main__':
               restrict_min_length=restrict_min_length,                  # the minimum length of the sentence
               restrict_max_length=restrict_max_length,                  # the maximum length of the sentence
               train_prop=train_prop,                                    # the proportion of data to use for training
-              **{'most_common': 20  })                                    # additional params for the simulation
+              # )
+              **{'most_common': 50, 'exclude_eos': False})              # additional params for the simulation
 
     if train:
 

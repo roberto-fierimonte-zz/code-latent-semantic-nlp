@@ -64,6 +64,15 @@ class RunWords(object):
 
         files = []
 
+        # wtr_file = 'words_to_return_{0}_{1}.p'.format(restrict_min_length, restrict_max_length)
+        # counter_file = 'counter_{0}_{1}.p'.format(restrict_min_length, restrict_max_length)
+        # words_file = 'words_{0}_{1}.p'.format(restrict_min_length, restrict_max_length)
+        #
+        # if wtr_file in os.listdir(folder):
+        #     with open(os.path.join(self.main_dir, folder, wtr_file), 'rb') as f:
+        #         words_to_return = cPickle.load(f)
+        #
+        # else:
         for f in os.listdir(folder):
 
             try:
@@ -77,8 +86,14 @@ class RunWords(object):
             else:
                 files.append(f)
 
+        # if counter_file in os.listdir(folder):
+        #     with open(os.path.join(self.main_dir, folder, counter_file), 'rb') as f:
+        #         c = cPickle.load(f)
+        # else:
         c = Counter()
         words = []
+
+        eos_ind = self.valid_vocab.index('<EOS>')
         for f in files:
 
             with open(os.path.join(self.main_dir, folder, f), 'r') as d:
@@ -89,7 +104,16 @@ class RunWords(object):
                     for w in new_words:
                         c.update(w)
 
+        # if words_file not in os.listdir(folder):
+        #     with open(os.path.join(self.main_dir, folder, words_file), 'wb') as f:
+        #         cPickle.dump(words, f)
+        #
+        # if counter_file not in os.listdir(folder):
+        #     with open(os.path.join(self.main_dir, folder, counter_file), 'wb') as f:
+        #         cPickle.dump(c, f)
+
         print("""I've read all the files""")
+
         L = np.array([len(s) for s in words])
         max_L = max(L)
 
@@ -110,28 +134,43 @@ class RunWords(object):
             del L_i, word_array
 
         words_to_return = np.concatenate(word_arrays)
-        print("""I've loaded all the words""")
-
+        #     with open(os.path.join(self.main_dir, folder, wtr_file), 'wb') as f:
+        #         cPickle.dump(words_to_return, f)
+        #     print("""I've loaded all the words""")
+        #
+        # with open(os.path.join(self.main_dir, folder, counter_file), 'rb') as f:
+        #     c = cPickle.load(f)
+        # with open(os.path.join(self.main_dir, folder, words_file), 'rb') as f:
+        #     words = cPickle.load(f)
+        np.random.seed(1234)
         training_mask = np.random.rand(len(words_to_return)) < train_prop
 
         if 'most_common' in kwargs:
-            most_common = [k for (k, _) in c.most_common(kwargs['most_common'])]
+            if 'exclude_eos' in kwargs and kwargs['exclude_eos'] is True:
+                most_common = [k for (k, _) in c.most_common(kwargs['most_common'])]
+            else:
+                most_common = [k for (k, _) in c.most_common(kwargs['most_common']) if k is not eos_ind]
             meaningful_mask = np.sign(np.isin(words_to_return, most_common, invert=True) - 0.5)
+            meaningful_mask_train = np.int32(meaningful_mask[training_mask])
+            meaningful_mask_test = np.int32(meaningful_mask[~training_mask])
 
         elif 'tf-idf' in kwargs:
             meaningful_mask = np.full((len(words), max_L), 1)
             for i, w in enumerate(words):
                 meaningful_mask[i, 0:len(w)] = np.sign(~np.in1d(w, [i for i in w if tf_idf(i, w, words) < kwargs['tf-idf']]) - 0.5)
+            meaningful_mask_train = np.int32(meaningful_mask[training_mask])
+            meaningful_mask_test = np.int32(meaningful_mask[~training_mask])
         else:
-            meaningful_mask = np.full((len(words), max_L), 1)
+            # meaningful_mask = np.full((len(words), max_L), 1)
+            meaningful_mask_train = None
+            meaningful_mask_test = None
 
         print("""I've computed the meaningfulness mask""")
 
         del words
-        np.random.seed(1234)
 
         return words_to_return[training_mask], words_to_return[~training_mask], L[training_mask], L[~training_mask], \
-               np.int32(meaningful_mask[training_mask]), np.int32(meaningful_mask[~training_mask])
+               meaningful_mask_train, meaningful_mask_test
 
     # Compute ELBO using the current validation batch
     def call_elbo_fn(self, elbo_fn, x, meaningful_mask):
@@ -260,6 +299,7 @@ class RunWords(object):
         generate_output_posterior = self.get_generate_output_posterior(val_beam_size)
 
         print('Starting training...')
+        np.random.seed(1234)
         for i in range(n_iter):
 
             start = time.clock()
@@ -283,17 +323,20 @@ class RunWords(object):
             else:
                 drop_mask = None
 
-            meaningful_mask = self.meaningful_mask_train[batch_indices]
+            if self.meaningful_mask_train is not None:
+                meaningful_mask = self.meaningful_mask_train[batch_indices]
+            else:
+                meaningful_mask = None
 
             # Perform training iteration using the current settings (now with meaningful_mask)
             elbo, kl, pp = self.call_optimiser(optimiser, batch, beta, drop_mask, meaningful_mask)
 
-            if elbo is np.NaN or elbo is None:
-                print('Error')
-
             print('Iteration ' + str(i + 1) + ': ELBO = ' + str(elbo/batch_size) + ' (KL = ' + str(kl/batch_size) +
                   ') per data point (PP = ' + str(pp) + ') (time taken = ' + str(time.clock() - start) +
                   ' seconds)')
+
+            if i == 50:
+                pass
 
             if val_freq is not None and i % val_freq == 0:
 
@@ -302,7 +345,10 @@ class RunWords(object):
                 val_batch_indices = np.random.choice(len(self.X_test), val_batch_size)
                 val_batch = np.array([self.X_test[ind] for ind in val_batch_indices])
 
-                val_meaningful_mask = self.meaningful_mask_test[val_batch_indices]
+                if self.meaningful_mask_test is not None:
+                    val_meaningful_mask = self.meaningful_mask_test[val_batch_indices]
+                else:
+                    val_meaningful_mask = None
 
                 val_elbo, val_kl, val_pp = self.call_elbo_fn(elbo_fn, val_batch, val_meaningful_mask)
 
@@ -316,7 +362,10 @@ class RunWords(object):
                 post_batch_indices = np.random.choice(len(self.X_train), val_print_gen, replace=False)
                 post_batch = np.array([self.X_train[ind] for ind in post_batch_indices])
 
-                post_batch_meaningful_mask = self.meaningful_mask_train[post_batch_indices]
+                if self.meaningful_mask_train is not None:
+                    post_batch_meaningful_mask = self.meaningful_mask_train[post_batch_indices]
+                else:
+                    post_batch_meaningful_mask = None
 
                 output_posterior = self.call_generate_output_posterior(generate_output_posterior, post_batch, post_batch_meaningful_mask)
 
