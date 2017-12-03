@@ -10,6 +10,7 @@ import lasagne
 
 from trainers.sgvb import SGVBWords as SGVB
 from run import RunWords as Run
+from datetime import datetime
 
 import numpy as np
 np.set_printoptions(threshold=3000000)
@@ -19,7 +20,7 @@ sys.setrecursionlimit(5000000)
 
 
 main_dir = '.'
-out_dir = './output'
+out_dir = './output/{}'.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 
 dataset = 'BookCorpus/processed_vocab20000_1to60_limunk0.0'             # dataset folder
 
@@ -34,7 +35,7 @@ solver = SGVB                                                           # solver
 
 vocab_size = len(valid_vocab)                                           # size of the vocabulary
 restrict_min_length = 5                                                 # minimum length of the sentence
-restrict_max_length = 10                                                # maximum length of the sentence
+restrict_max_length = 25                                                # maximum length of the sentence
 train_prop = 0.9                                                        # fraction of data to use as the training set
 
 d_z = 50                                                                # dimension of the latent space
@@ -136,7 +137,7 @@ if __name__ == '__main__':
               restrict_max_length=restrict_max_length,                  # the maximum length of the sentence
               train_prop=train_prop,                                    # the proportion of data to use for training
               # )
-              **{'most_common': 50, 'exclude_eos': False})              # additional params for the simulation
+              **{'most_common': 50, 'exclude_eos': True})              # additional params for the simulation
 
     if train:
 

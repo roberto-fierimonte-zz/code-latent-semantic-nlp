@@ -5,6 +5,7 @@ import time
 import numpy as np
 import json
 from lasagne.updates import adam
+from datetime import datetime
 from data_processing.utilities import chunker
 
 from model.generative_models import *
@@ -146,10 +147,11 @@ class RunWords(object):
         training_mask = np.random.rand(len(words_to_return)) < train_prop
 
         if 'most_common' in kwargs:
+            most_common = [k for (k, _) in c.most_common(kwargs['most_common'])]
             if 'exclude_eos' in kwargs and kwargs['exclude_eos'] is True:
-                most_common = [k for (k, _) in c.most_common(kwargs['most_common'])]
+                pass
             else:
-                most_common = [k for (k, _) in c.most_common(kwargs['most_common']) if k is not eos_ind]
+                most_common.remove(eos_ind)
             meaningful_mask = np.sign(np.isin(words_to_return, most_common, invert=True) - 0.5)
             meaningful_mask_train = np.int32(meaningful_mask[training_mask])
             meaningful_mask_test = np.int32(meaningful_mask[~training_mask])
@@ -298,6 +300,8 @@ class RunWords(object):
 
         generate_output_posterior = self.get_generate_output_posterior(val_beam_size)
 
+        log_file = open(os.path.join(self.out_dir, '{}.log'.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))), 'a+')
+
         print('Starting training...')
         np.random.seed(1234)
         for i in range(n_iter):
@@ -331,9 +335,12 @@ class RunWords(object):
             # Perform training iteration using the current settings (now with meaningful_mask)
             elbo, kl, pp = self.call_optimiser(optimiser, batch, beta, drop_mask, meaningful_mask)
 
-            print('Iteration ' + str(i + 1) + ': ELBO = ' + str(elbo/batch_size) + ' (KL = ' + str(kl/batch_size) +
-                  ') per data point (PP = ' + str(pp) + ') (time taken = ' + str(time.clock() - start) +
-                  ' seconds)')
+            iter_string = 'Iteration ' + str(i + 1) + ': ELBO = ' + str(elbo/batch_size) + ' (KL = ' + str(kl/batch_size) +\
+                           ') per data point (PP = ' + str(pp) + ') (time taken = ' + str(time.clock() - start) +\
+                           ' seconds)'
+
+            log_file.write(iter_string + '\n')
+            print(iter_string)
 
             if i == 50:
                 pass
@@ -352,8 +359,11 @@ class RunWords(object):
 
                 val_elbo, val_kl, val_pp = self.call_elbo_fn(elbo_fn, val_batch, val_meaningful_mask)
 
-                print('Test set ELBO = ' + str(val_elbo/val_batch_size) + ' (KL = ' + str(kl/batch_size) +
-                      ') per data point (PP = ' + str(val_pp) + ')')
+                test_string = 'Test set ELBO = ' + str(val_elbo/val_batch_size) + ' (KL = ' + str(kl/batch_size) +\
+                               ') per data point (PP = ' + str(val_pp) + ')'
+
+                log_file.write(test_string + '\n')
+                print(test_string)
 
                 output_prior = self.call_generate_output_prior(generate_output_prior)
 
@@ -388,6 +398,7 @@ class RunWords(object):
                     cPickle.dump(updates, f, protocol=cPickle.HIGHEST_PROTOCOL)
 
         # Save all parameters and terminate training phase
+        log_file.close()
 
         with open(os.path.join(self.out_dir, 'all_embeddings.save'), 'wb') as f:
             cPickle.dump(self.vb.all_embeddings.get_value(), f, protocol=cPickle.HIGHEST_PROTOCOL)
