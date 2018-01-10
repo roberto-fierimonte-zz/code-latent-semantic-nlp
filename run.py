@@ -4,6 +4,7 @@ import pickle as cPickle
 import time
 import numpy as np
 import json
+import logging
 from lasagne.updates import adam
 from datetime import datetime
 from data_processing.utilities import chunker
@@ -11,6 +12,9 @@ from data_processing.utilities import chunker
 from model.generative_models import *
 from process_dataset import tf_idf
 
+logger = logging.getLogger('RunWords')
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 class RunWords(object):
 
@@ -18,13 +22,14 @@ class RunWords(object):
                  pre_trained=False, restrict_min_length=None, restrict_max_length=None,
                  train_prop=0.95, **kwargs):
 
+        self.log_fh = logging.FileHandler(os.path.join(out_dir, '{}.log'.format(datetime.now().strftime('%Y-%m-%d_%H:%M:%S'))))
+        self.log_fh.setFormatter(formatter)
+        logger.addHandler(self.log_fh)
+
         self.valid_vocab = valid_vocab
 
         self.main_dir = main_dir
         self.out_dir = out_dir
-
-        if ~os.path.exists(self.out_dir):
-            os.makedirs(self.out_dir, exist_ok=True)
 
         self.load_param_dir = load_param_dir
 
@@ -38,6 +43,8 @@ class RunWords(object):
 
         print('# training sentences = ' + str(len(self.L_train)))
         print('# test sentences = ' + str(len(self.L_test)))
+        logger.info('# training sentences = ' + str(len(self.L_train)))
+        logger.info('# test sentences = ' + str(len(self.L_test)))
 
         # Get the actual maximum length of all the sentences
         self.max_length = np.concatenate((self.X_train, self.X_test), axis=0).shape[1]
@@ -64,16 +71,6 @@ class RunWords(object):
         folder = './data/' + dataset
 
         files = []
-
-        # wtr_file = 'words_to_return_{0}_{1}.p'.format(restrict_min_length, restrict_max_length)
-        # counter_file = 'counter_{0}_{1}.p'.format(restrict_min_length, restrict_max_length)
-        # words_file = 'words_{0}_{1}.p'.format(restrict_min_length, restrict_max_length)
-        #
-        # if wtr_file in os.listdir(folder):
-        #     with open(os.path.join(self.main_dir, folder, wtr_file), 'rb') as f:
-        #         words_to_return = cPickle.load(f)
-        #
-        # else:
         for f in os.listdir(folder):
 
             try:
@@ -87,10 +84,6 @@ class RunWords(object):
             else:
                 files.append(f)
 
-        # if counter_file in os.listdir(folder):
-        #     with open(os.path.join(self.main_dir, folder, counter_file), 'rb') as f:
-        #         c = cPickle.load(f)
-        # else:
         c = Counter()
         words = []
 
@@ -105,22 +98,11 @@ class RunWords(object):
                     for w in new_words:
                         c.update(w)
 
-        # if words_file not in os.listdir(folder):
-        #     with open(os.path.join(self.main_dir, folder, words_file), 'wb') as f:
-        #         cPickle.dump(words, f)
-        #
-        # if counter_file not in os.listdir(folder):
-        #     with open(os.path.join(self.main_dir, folder, counter_file), 'wb') as f:
-        #         cPickle.dump(c, f)
-
-        print("""I've read all the files""")
-
         L = np.array([len(s) for s in words])
         max_L = max(L)
 
         # We want to identify meaningful words using different approaches
         # meaningful_mask contains the meaningful_words
-
         word_arrays = []
 
         for i in range(0, len(L), load_batch_size):
@@ -135,18 +117,12 @@ class RunWords(object):
             del L_i, word_array
 
         words_to_return = np.concatenate(word_arrays)
-        #     with open(os.path.join(self.main_dir, folder, wtr_file), 'wb') as f:
-        #         cPickle.dump(words_to_return, f)
-        #     print("""I've loaded all the words""")
-        #
-        # with open(os.path.join(self.main_dir, folder, counter_file), 'rb') as f:
-        #     c = cPickle.load(f)
-        # with open(os.path.join(self.main_dir, folder, words_file), 'rb') as f:
-        #     words = cPickle.load(f)
+
+
         np.random.seed(1234)
         training_mask = np.random.rand(len(words_to_return)) < train_prop
 
-        if 'most_common' in kwargs:
+        if 'most_common' in kwargs and kwargs['most_common'] > 0:
             most_common = [k for (k, _) in c.most_common(kwargs['most_common'])]
             if 'exclude_eos' in kwargs and kwargs['exclude_eos'] is True:
                 pass
@@ -166,8 +142,6 @@ class RunWords(object):
             # meaningful_mask = np.full((len(words), max_L), 1)
             meaningful_mask_train = None
             meaningful_mask_test = None
-
-        print("""I've computed the meaningfulness mask""")
 
         del words
 
@@ -219,6 +193,9 @@ class RunWords(object):
             print('gen x sampled: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_sampled[n]]))
             print(' gen x argmax: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_argmax[n]]))
             print('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))
+            logger.info('gen x sampled: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_sampled[n]]))
+            logger.info(' gen x argmax: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_argmax[n]]))
+            logger.info('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))
 
             print('-'*10)
 
@@ -264,16 +241,21 @@ class RunWords(object):
             print('gen x sampled: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_sampled[n]]))
             print(' gen x argmax: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_argmax[n]]))
             print('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))
+            logger.info('       true x: ' + ' '.join([valid_vocab_for_true[i] for i in x[n]]).strip())
+            logger.info(' meaningful x: ' + ' '.join([valid_vocab_for_true[i] for i in x_m[n]]).strip())
+            logger.info('gen x sampled: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_sampled[n]]))
+            logger.info(' gen x argmax: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_argmax[n]]))
+            logger.info('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))
 
             print('-'*10)
 
         print('='*10)
 
     # From here onwards, each function performs a different task
-    
+
     def train(self, n_iter, batch_size, num_samples, word_drop=None, grad_norm_constraint=None, update=adam,
-              update_kwargs=None, warm_up=None, val_freq=None, val_batch_size=0, val_num_samples=0, val_print_gen=5,
-              val_beam_size=15, save_params_every=None):
+              update_kwargs=None, warm_up=None, optimal_ratio=False, val_freq=None, val_batch_size=0, val_num_samples=0,
+              val_print_gen=5, val_beam_size=15, save_params_every=None):
 
         # If we already have parameters load them
         if self.pre_trained:
@@ -287,7 +269,8 @@ class RunWords(object):
                                                grad_norm_constraint=grad_norm_constraint,
                                                update=update,
                                                update_kwargs=update_kwargs,
-                                               saved_update=saved_update)
+                                               saved_update=saved_update,
+                                               optimal_ratio=optimal_ratio)
 
         # Initialise ELBO function (symbolic function)
         elbo_fn = self.vb.elbo_fn(num_samples=val_num_samples)
@@ -300,9 +283,6 @@ class RunWords(object):
 
         generate_output_posterior = self.get_generate_output_posterior(val_beam_size)
 
-        log_file = open(os.path.join(self.out_dir, '{}.log'.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))), 'a+')
-
-        print('Starting training...')
         np.random.seed(1234)
         for i in range(n_iter):
 
@@ -335,15 +315,12 @@ class RunWords(object):
             # Perform training iteration using the current settings (now with meaningful_mask)
             elbo, kl, pp = self.call_optimiser(optimiser, batch, beta, drop_mask, meaningful_mask)
 
-            iter_string = 'Iteration ' + str(i + 1) + ': ELBO = ' + str(elbo/batch_size) + ' (KL = ' + str(kl/batch_size) +\
-                           ') per data point (PP = ' + str(pp) + ') (time taken = ' + str(time.clock() - start) +\
-                           ' seconds)'
-
-            log_file.write(iter_string + '\n')
-            print(iter_string)
-
-            if i == 50:
-                pass
+            print('Iteration ' + str(i + 1) + ': ELBO = ' + str(elbo/batch_size) + ' (KL = ' + str(kl/batch_size) +\
+                  ') per data point (PP = ' + str(pp) + ') (time taken = ' + str(time.clock() - start) +\
+                  ' seconds)')
+            logger.info('Iteration ' + str(i + 1) + ': ELBO = ' + str(elbo / batch_size) + ' (KL = ' + str(kl / batch_size) + \
+                  ') per data point (PP = ' + str(pp) + ') (time taken = ' + str(time.clock() - start) + \
+                  ' seconds)')
 
             if val_freq is not None and i % val_freq == 0:
 
@@ -359,11 +336,11 @@ class RunWords(object):
 
                 val_elbo, val_kl, val_pp = self.call_elbo_fn(elbo_fn, val_batch, val_meaningful_mask)
 
-                test_string = 'Test set ELBO = ' + str(val_elbo/val_batch_size) + ' (KL = ' + str(kl/batch_size) +\
-                               ') per data point (PP = ' + str(val_pp) + ')'
+                print('Test set ELBO = ' + str(val_elbo/val_batch_size) + ' (KL = ' + str(kl/batch_size) +\
+                               ') per data point (PP = ' + str(val_pp) + ')')
+                logger.info('Test set ELBO = ' + str(val_elbo / val_batch_size) + ' (KL = ' + str(kl / batch_size) + \
+                      ') per data point (PP = ' + str(val_pp) + ')')
 
-                log_file.write(test_string + '\n')
-                print(test_string)
 
                 output_prior = self.call_generate_output_prior(generate_output_prior)
 
@@ -398,7 +375,6 @@ class RunWords(object):
                     cPickle.dump(updates, f, protocol=cPickle.HIGHEST_PROTOCOL)
 
         # Save all parameters and terminate training phase
-        log_file.close()
 
         with open(os.path.join(self.out_dir, 'all_embeddings.save'), 'wb') as f:
             cPickle.dump(self.vb.all_embeddings.get_value(), f, protocol=cPickle.HIGHEST_PROTOCOL)
@@ -421,13 +397,19 @@ class RunWords(object):
 
         batches_complete = 0
 
-        for batch_X in chunker([self.X_test], batch_size):
+        for n, batch_X in enumerate(chunker([self.X_test], batch_size)):
 
             start = time.clock()
+
+            if self.meaningful_mask_test is not None:
+                meaningful_mask = self.meaningful_mask_test[n * batch_size]
+            else:
+                meaningful_mask = None
 
             if sub_sample_size is None:
 
                 elbo_batch, kl_batch, pp_batch = self.call_elbo_fn(elbo_fn, batch_X[0])
+
 
             else:
 
@@ -436,7 +418,7 @@ class RunWords(object):
 
                 for sub_sample in range(1, int(num_samples / sub_sample_size) + 1):
 
-                    elbo_sub_batch, kl_sub_batch, pp_sub_batch = self.call_elbo_fn(elbo_fn, batch_X[0])
+                    elbo_sub_batch, kl_sub_batch, pp_sub_batch = self.call_elbo_fn(elbo_fn, batch_X[0], meaningful_mask)
 
                     elbo_batch = (elbo_batch * (float((sub_sample * sub_sample_size) - sub_sample_size) /
                                                 float(sub_sample * sub_sample_size))) + \
@@ -455,11 +437,17 @@ class RunWords(object):
                   + ' so far; test set ELBO = ' + str(elbo) + ', test set KL = ' + str(kl) + ' / '
                   + str(elbo / (batches_complete * batch_size)) + ', ' + str(kl / (batches_complete * batch_size)) +
                   ', per obs. (time taken = ' + str(time.clock() - start) + ' seconds)')
+            logger.info('Tested batches ' + str(batches_complete) + ' of ' + str(round(self.X_test.shape[0] / batch_size))
+                  + ' so far; test set ELBO = ' + str(elbo) + ', test set KL = ' + str(kl) + ' / '
+                  + str(elbo / (batches_complete * batch_size)) + ', ' + str(kl / (batches_complete * batch_size)) +
+                  ', per obs. (time taken = ' + str(time.clock() - start) + ' seconds)')
 
         pp = np.exp(-elbo / np.sum(1 + np.minimum(self.X_test, 0)))
 
         print('Test set ELBO = ' + str(elbo))
         print('Test set perplexity = ' + str(pp))
+        logger.info('Test set ELBO = ' + str(elbo))
+        logger.info('Test set perplexity = ' + str(pp))
 
     def generate_output(self, prior, posterior, num_outputs, beam_size=15):
 
@@ -480,8 +468,12 @@ class RunWords(object):
 
             batch_indices = np.random.choice(len(self.X_test), num_outputs, replace=False)
             batch_in = np.array([self.X_test[ind] for ind in batch_indices])
+            if self.meaningful_mask_test is not None:
+                meaningful_mask = self.meaningful_mask_test[batch_indices]
+            else:
+                meaningful_mask = None
 
-            output_posterior = self.call_generate_output_posterior(generate_output_posterior, batch_in)
+            output_posterior = self.call_generate_output_posterior(generate_output_posterior, batch_in, meaningful_mask)
 
             for key, value in output_posterior.items():
                 np.save(os.path.join(self.out_dir, key + '.npy'), value)
@@ -533,6 +525,7 @@ class RunWords(object):
             missing_words[n] = missing_words_n
 
         print(missing_words)
+        logger.info()
 
         missing_words_mask = [[0 if l in array else 1 for l in range(self.max_length)] for array in missing_words]
         missing_words_mask = np.array(missing_words_mask)

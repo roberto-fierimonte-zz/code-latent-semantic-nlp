@@ -1,5 +1,5 @@
 from model.distributions import GaussianDiagonal, Categorical
-from model.generative_models import GenStanfordWords as GenerativeModel
+from model.generative_models import GenAUTRWords as GenerativeModel
 from model.recognition_models import RecRNN as RecognitionModel
 
 import json
@@ -10,7 +10,6 @@ import lasagne
 
 from trainers.sgvb import SGVBWords as SGVB
 from run import RunWords as Run
-from datetime import datetime
 
 import numpy as np
 np.set_printoptions(threshold=3000000)
@@ -18,11 +17,27 @@ np.set_printoptions(threshold=3000000)
 
 sys.setrecursionlimit(5000000)
 
+# Run settings
+vocab_size = 20000                                                       # size of the vocabulary
+most_common = -1                                                        # number of most common words
+restrict_min_length = 6                                                 # minimum length of the sentence
+restrict_max_length = 10                                                # maximum length of the sentence
+optimal_ratio = False                                                    # use the optimal ratio between the expectation and the KL in the ELBO
+dataset = 'BookCorpus'
 
 main_dir = '.'
-out_dir = './output/{}'.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+if most_common > 0:
+    out_dir = './output/{}{}_{}to{}Top{}'.format(GenerativeModel.__name__, vocab_size, restrict_min_length,
+                                                 restrict_max_length, most_common)
+else:
+    out_dir = './output/{}{}_{}to{}All'.format(GenerativeModel.__name__, vocab_size, restrict_min_length, restrict_max_length)
 
-dataset = 'BookCorpus/processed_vocab20000_1to60_limunk0.0'             # dataset folder
+if optimal_ratio:
+    out_dir = out_dir + '_OptBeta'
+
+if not os.path.exists(out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+dataset = '{}/processed_vocab{}_1to60_limunk0.0'.format(dataset, vocab_size)             # dataset folder
 
 with open(os.path.join(main_dir, 'data/', dataset, 'valid_vocab.txt'), 'r') as f:
     valid_vocab = json.loads(f.read())
@@ -31,11 +46,7 @@ eos_ind = valid_vocab.index('<EOS>')                                    # index 
 
 
 solver = SGVB                                                           # solver
-
-
 vocab_size = len(valid_vocab)                                           # size of the vocabulary
-restrict_min_length = 5                                                 # minimum length of the sentence
-restrict_max_length = 25                                                # maximum length of the sentence
 train_prop = 0.9                                                        # fraction of data to use as the training set
 
 d_z = 50                                                                # dimension of the latent space
@@ -74,7 +85,7 @@ solver_kwargs = {'generative_model': GenerativeModel,                   # genera
                  }
 
 pre_trained = False                                                     # if we already have the parameters
-load_param_dir = 'code_outputs/2017_08_23_09_11_02'                     # directory with the saved parameters
+load_param_dir = out_dir                                                # directory with the saved parameters
 
 train = True                                                            # do not train if we already have the parameters
 
@@ -95,8 +106,8 @@ val_num_samples = 1                                                     # number
 save_params_every = 10000                                               # check-point for parameters saving
 
 # The second part of the settings is task-specific
-generate_output_prior = False                                           # ???
-generate_output_posterior = False                                       # ???
+generate_output_prior = True                                           # ???
+generate_output_posterior = True                                       # ???
 generate_canvases = False                                               # ???
 
 impute_missing_words = False                                            # ???
@@ -113,7 +124,7 @@ latent_trajectory_steps = 10                                            # ???
 num_outputs = 100                                                       # ???
 
 
-test = True                                                             # ???
+test = False                                                             # ???
 test_batch_size = 500                                                   # ???
 test_num_samples = 100                                                  # ???
 test_sub_sample_size = 10                                               # ???
@@ -136,8 +147,7 @@ if __name__ == '__main__':
               restrict_min_length=restrict_min_length,                  # the minimum length of the sentence
               restrict_max_length=restrict_max_length,                  # the maximum length of the sentence
               train_prop=train_prop,                                    # the proportion of data to use for training
-              # )
-              **{'most_common': 50, 'exclude_eos': True})              # additional params for the simulation
+              **{'most_common': most_common, 'exclude_eos': False})              # additional params for the simulation
 
     if train:
 
@@ -155,6 +165,7 @@ if __name__ == '__main__':
                   val_batch_size=val_batch_size,                        # number of sentences per per evaluation iteration
                   val_num_samples=val_num_samples,                      # number of samples per sentence per evaluation iteration
                   warm_up=warm_up,                                      # number of KL annealing iterations
+                  optimal_ratio=optimal_ratio,                          # use the optimal ratio between the expectation and the KL in the ELBO
                   save_params_every=save_params_every,                  # check-point for parameters saving
                   word_drop=word_drop)                                  # percentage of words to drop to prevent vanishing KL term
 

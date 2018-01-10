@@ -66,7 +66,7 @@ class SGVBWords(object):
 
         return x_cut_off.T
 
-    def symbolic_elbo(self, x, x_m, num_samples, beta=None, drop_mask=None):
+    def symbolic_elbo(self, x, x_m, num_samples, optimal_ratio=False, beta=None, drop_mask=None):
 
         x_embedded = self.embedder(x, self.all_embeddings)  # N * max(L) * E
         x_m_embedded = self.embedder(x_m, self.all_embeddings)
@@ -81,10 +81,13 @@ class SGVBWords(object):
 
         log_p_x = self.generative_model.log_p_x(x, x_embedded, x_embedded_dropped, z, self.all_embeddings)  # (S*N)
 
-        if beta is None:
-            elbo = T.sum((1. / num_samples) * log_p_x) - T.sum(kl)
+        if optimal_ratio:
+            elbo = T.sum((1. / num_samples) * log_p_x) - T.sum(kl)/2
         else:
-            elbo = T.sum((1. / num_samples) * log_p_x) - T.sum(beta * kl)
+            if beta is None:
+                elbo = T.sum((1. / num_samples) * log_p_x) - T.sum(kl)
+            else:
+                elbo = T.sum((1. / num_samples) * log_p_x) - T.sum(beta * kl)
 
         pp = T.exp(-(T.sum((1. / num_samples) * log_p_x) - T.sum(kl)) / T.sum(T.switch(T.lt(x, 0), 0, 1)))
 
@@ -95,7 +98,7 @@ class SGVBWords(object):
         x = T.imatrix('x')  # N * max(L)
         x_m = T.imatrix('x_m')
 
-        elbo, kl, pp = self.symbolic_elbo(x, x_m, num_samples, None, None)
+        elbo, kl, pp = self.symbolic_elbo(x, x_m, num_samples, beta=None, drop_mask=None, optimal_ratio=False)
 
         elbo_fn = theano.function(inputs=[x, x_m],
                                   outputs=[elbo, kl, pp],
@@ -105,7 +108,7 @@ class SGVBWords(object):
 
         return elbo_fn
 
-    def optimiser(self, num_samples, grad_norm_constraint, update, update_kwargs, saved_update=None):
+    def optimiser(self, num_samples, grad_norm_constraint, update, update_kwargs, optimal_ratio, saved_update=None):
 
         x = T.imatrix('x')  # N * max(L)
         x_m = T.imatrix('x_m')
@@ -114,7 +117,7 @@ class SGVBWords(object):
 
         drop_mask = T.matrix('drop_mask')  # N * max(L)
 
-        elbo, kl, pp = self.symbolic_elbo(x, x_m, num_samples, beta, drop_mask)
+        elbo, kl, pp = self.symbolic_elbo(x, x_m, num_samples, optimal_ratio, beta, drop_mask)
 
         params = self.generative_model.get_params() + self.recognition_model.get_params() + [self.all_embeddings]
         grads = T.grad(-elbo, params, disconnected_inputs='ignore')
