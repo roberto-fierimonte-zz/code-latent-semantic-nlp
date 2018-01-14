@@ -5,9 +5,9 @@ from collections import Counter
 from nltk.tokenize import word_tokenize
 
 
-dataset = 'Gutenberg'
+dataset = 'BookCorpus'
 
-vocab_size = 20000
+vocab_size = 5000
 
 min_len = 1
 max_len = 60
@@ -28,7 +28,6 @@ for filename in files:
     with open(filename, 'r') as f:
 
         for line in f:
-            print('\n===\n'  + line)
             sent_counter += 1
             if (sent_counter % 1000000 == 0) and (sent_counter > 0):
                 print("Read %dM sentences" % (sent_counter / 1000000))

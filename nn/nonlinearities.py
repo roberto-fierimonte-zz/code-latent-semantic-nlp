@@ -1,6 +1,4 @@
-from lasagne.nonlinearities import elu
-from lasagne.nonlinearities import softplus
-
+from lasagne.nonlinearities import elu, softplus, sigmoid
 
 def elu_plus_one(x):
 
