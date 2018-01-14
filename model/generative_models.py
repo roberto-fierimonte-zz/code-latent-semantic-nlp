@@ -1,6 +1,10 @@
-import numpy as np
 import theano
 import theano.tensor as T
+
+import numpy as np
+
+from collections import OrderedDict
+
 from lasagne.layers import DenseLayer, get_all_param_values, get_all_params, get_output, InputLayer, LSTMLayer, \
     RecurrentLayer, set_all_param_values, BiasLayer, NonlinearityLayer, ConcatLayer, ElemwiseMergeLayer
 
@@ -498,7 +502,7 @@ class GenLatentGateWords(object):
 
         self.rnn = self.rnn_fn()
 
-        self.W_z = theano.shared(np.float32(np.random.normal(0., 0.1, (self.z_dim, self.embedding_dim))))   # (Z x E)
+        self.W_z = theano.shared(np.float32(np.random.normal(0., 0.1, (self.z_dim, self.embedding_dim))))   # Z x E
         # initial code-to-embedding parameters
 
     def rnn_fn(self):
@@ -507,43 +511,44 @@ class GenLatentGateWords(object):
         :return
         """
 
-        l_in = InputLayer((None, self.max_length, self.embedding_dim), name='rnn_input')
+        net = OrderedDict()
+        net['rnn_input'] = InputLayer((None, self.max_length, self.embedding_dim))
+        l_current = net['rnn_input']
 
-        l_current = l_in
+        # l_in = InputLayer((None, self.max_length, self.embedding_dim), name='rnn_input')
+        # l_current = l_in
 
         for h in range(self.nn_rnn_depth):
 
-            l_current = LSTMLayer(l_current, num_units=self.nn_rnn_hid_units, nonlinearity=self.nn_rnn_hid_nonlinearity)
+            net['rnn_' + str(h)] = LSTMLayer(l_current, num_units=self.nn_rnn_hid_units, nonlinearity=self.nn_rnn_hid_nonlinearity)
+            l_current = net['rnn_' + str(h)]
 
-        l_out = RecurrentLayer(l_current, num_units=self.embedding_dim, W_hid_to_hid=T.zeros, nonlinearity=None)
+        net['out'] = RecurrentLayer(l_current, num_units=self.embedding_dim, W_hid_to_hid=T.zeros, nonlinearity=None)
+        net['gate_input'] = InputLayer((None, self.max_length, self.embedding_dim))
+        net['bias'] = BiasLayer(net['out'])
+        net['sigm'] = NonlinearityLayer(net['bias'], nonlinearity=sigmoid)
 
-        l_in_gate = InputLayer((None, self.max_length, self.embedding_dim), name='gate_input')
+        # def gate():
+        #     x = T.dtensor3('x')
+        #     y = T.dtensor3('y')
+        #     gate = (1 - x) * y
+        #
+        #     return theano.function([x, y], gate, allow_input_downcast=True)
+        #
+        # gate_fn = gate()
 
-        l_bias = BiasLayer(l_out)
-        l_sigm = NonlinearityLayer(l_bias, nonlinearity=sigmoid)
+        net['gate'] = ElemwiseMergeLayer([net['sigm'], net['gate_input']], merge_function=lambda x, y: (1 - x) * y)
+        net['concat'] = ConcatLayer([net['out'], net['gate']], axis=0)
+        net['final'] = BiasLayer(net['concat'])
 
-        def gate():
-            x = T.dtensor3('x')
-            y = T.dtensor3('y')
-            gate = (1 - x) * y
-
-            return theano.function([x, y], gate, allow_input_downcast=True)
-
-        gate_fn = gate()
-
-        l_gate = ElemwiseMergeLayer([l_sigm, l_in_gate], merge_function=gate_fn)
-
-        l_concat = ConcatLayer([l_out, l_gate], axis=0)
-        l_final = BiasLayer(l_concat)
-
-        return l_final
+        return net
 
     def log_p_z(self, z):
         """
 
-        :param z: ((S * N) x Z) matrix
+        :param z:       ((S * N) x Z) matrix
 
-        :return log_p_z: (S * N) -dimensional vector
+        :return:        (S * N) -dimensional vector
         """
 
         log_p_z = self.dist_z.log_density(z)
@@ -553,33 +558,35 @@ class GenLatentGateWords(object):
     def get_probs(self, x, x_dropped, z, all_embeddings, mode='all'):
         """
 
-        :param x: ((S * N) x max(L) x E) tensor
-        :param z: ((S * N) x Z) matrix
-        :param all_embeddings: (D x E) matrix
-        :param mode: 'all' returns probabilities for every element in the vocabulary, 'true' returns only the
-        probability for the true word.
+        :param x:                   ((S * N) x max(L) x E) tensor
+        :param x_dropped:           ((S * N) x max(L) x E) tensor
+        :param z:                   ((S * N) x Z) matrix
+        :param all_embeddings:      ((V + 1) x E) matrix
+        :param mode:                'all' returns probabilities for every element in the vocabulary, 'true' returns
+        only the probability for the true word.
 
-        :return probs: ((S * N) x max(L) x E) tensor
+        :return probs:              ((S * N) x max(L) x E) tensor
         """
 
-        z_start = T.dot(z, self.W_z)  # N x E
+        z_start = T.dot(z, self.W_z)                                                                    # (S * N) x E
 
-        x_dropped_pre_padded = T.concatenate([T.shape_padaxis(z_start, 1), x_dropped], axis=1)[:, :-1]  # (S * N) x max(L)
-        # * E
 
-        hiddens = get_output(self.rnn, {'rnn_input': x_dropped_pre_padded, 'gate_input': None})  # (S*N) * max(L) * E
+        x_dropped_pre_padded = T.concatenate([T.shape_padaxis(z_start, 1), x_dropped], axis=1)[:, :-1]  # (S * N) x max(L) x E
 
-        probs_numerators = T.sum(x * hiddens, axis=-1)  # (S*N) * max(L)
+        hiddens = get_output(self.rnn['final'], {self.rnn['rnn_input']: x_dropped_pre_padded,
+                                                 self.rnn['gate_input']: x_dropped_pre_padded})         # (S * N) x max(L) x E
 
-        probs_denominators = T.dot(hiddens, all_embeddings.T)  # (S*N) * max(L) * D
+        probs_numerators = T.sum(x * hiddens, axis=-1)                                                  # (S * N) x max(L)
+
+        probs_denominators = T.dot(hiddens, all_embeddings.T)                                           # (S * N) x max(L) x (V + 1)
 
         if mode == 'all':
-            probs = last_d_softmax(probs_denominators)  # (S*N) * max(L) * D
+            probs = last_d_softmax(probs_denominators)                                                  # (S * N) x max(L) x E
         elif mode == 'true':
             probs_numerators -= T.max(probs_denominators, axis=-1)
             probs_denominators -= T.max(probs_denominators, axis=-1, keepdims=True)
 
-            probs = T.exp(probs_numerators) / T.sum(T.exp(probs_denominators), axis=-1)  # (S*N) * max(L)
+            probs = T.exp(probs_numerators) / T.sum(T.exp(probs_denominators), axis=-1)                 # (S * N) x max(L)
         else:
             raise Exception("mode must be in ['all', 'true']")
 
@@ -587,28 +594,28 @@ class GenLatentGateWords(object):
 
     def log_p_x(self, x, x_embedded, x_embedded_dropped, z, all_embeddings):
         """
-        :param x: N * max(L) tensor
-        :param x_embedded: N * max(L) * E tensor
-        :param z: (S*N) * dim(z) matrix
-        :param all_embeddings: D * E matrix
+        :param x:                   (N x max(L)) matrix
+        :param x_embedded:          (N x max(L) x E) tensor
+        :param z:                   (S * N) x Z) matrix
+        :param all_embeddings:      (V * E) matrix
 
-        :return log_p_x: (S*N) length vector
+        :return:                    (S * N) -dimensional vector
         """
 
         S = T.cast(z.shape[0] / x.shape[0], 'int32')
 
-        x_rep = T.tile(x, (S, 1))  # (S*N) * max(L)
-        x_rep_padding_mask = T.switch(T.lt(x_rep, 0), 0, 1)  # (S*N) * max(L)
+        x_rep = T.tile(x, (S, 1))                                                                       # (S * N) x max(L)
+        x_rep_padding_mask = T.switch(T.lt(x_rep, 0), 0, 1)                                             # (S * N) x max(L)
 
-        x_embedded_rep = T.tile(x_embedded, (S, 1, 1))  # (S*N) * max(L) * E
-        x_embedded_dropped_rep = T.tile(x_embedded_dropped, (S, 1, 1))  # (S*N) * max(L) * E
+        x_embedded_rep = T.tile(x_embedded, (S, 1, 1))                                                  # (S * N) x max(L) x E
+        x_embedded_dropped_rep = T.tile(x_embedded_dropped, (S, 1, 1))                                  # (S * N) x max(L) x E
 
-        probs = self.get_probs(x_embedded_rep, x_embedded_dropped_rep, z, all_embeddings, mode='true')  # (S*N) * max(L)
-        probs += T.cast(1.e-15, 'float32')  # (S*N) * max(L)
+        probs = self.get_probs(x_embedded_rep, x_embedded_dropped_rep, z, all_embeddings, mode='true')  # (S * N) x max(L)
+        probs += T.cast(1.e-15, 'float32')                                                              # (S * N) x max(L)
 
-        log_p_x = T.sum(x_rep_padding_mask * T.log(probs), axis=-1)  # (S*N)
+        log_p_x = T.sum(x_rep_padding_mask * T.log(probs), axis=-1)                                     # (S * N)
 
-        L = T.sum(x_rep_padding_mask, axis=1)  # (S*N)
+        L = T.sum(x_rep_padding_mask, axis=1)                                                           # (S * N)
 
         return log_p_x
 
@@ -640,7 +647,9 @@ class GenLatentGateWords(object):
             x_pre_padded = T.concatenate([T.shape_padaxis(z_start, 1), active_words_embedded_reshape], axis=1)[:, :-1]
             # (N*B) * max(L) * E
 
-            target_embeddings = get_output(self.rnn, x_pre_padded)[:, l].reshape((N, beam_size, self.embedding_dim))
+            target_embeddings = get_output(self.rnn['final'], {self.rnn['rnn_input']: x_pre_padded,
+                                                               self.rnn['gate_input']: x_pre_padded}
+                                           )[:, l].reshape((N, beam_size, self.embedding_dim))
             # N * B * E
 
             probs_denominators = T.dot(target_embeddings, all_embeddings.T)  # N * B * D
@@ -910,7 +919,7 @@ class GenLatentGateWords(object):
         :return:
         """
 
-        rnn_params = get_all_params(self.rnn, trainable=True)
+        rnn_params = get_all_params(self.rnn['final'], trainable=True)
 
         return rnn_params + [self.W_z]
 
@@ -921,7 +930,7 @@ class GenLatentGateWords(object):
         :return:
         """
 
-        rnn_params_vals = get_all_param_values(self.rnn)
+        rnn_params_vals = get_all_param_values(self.rnn['final'])
 
         W_z_val = self.W_z.get_value()
 

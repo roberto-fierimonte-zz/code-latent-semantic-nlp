@@ -23,7 +23,7 @@ if __name__ == '__main__':
     parser.add_argument('-max', '--max-length', default=30, dest='restrict_max_length')
     parser.add_argument('-dataset', default='BookCorpus')
     parser.add_argument('--optimal-beta', default=False, dest='optimal_ratio')
-    parser.add_argument('--generative-mode', '--gen-model', default='Stanford', dest='generative_model')
+    parser.add_argument('--generative-model', '--gen-model', default='Stanford', dest='generative_model')
     parser.add_argument('-train', default=True)
     parser.add_argument('-test', default=True)
     parser.add_argument('-v', '--verbose', default=True)
