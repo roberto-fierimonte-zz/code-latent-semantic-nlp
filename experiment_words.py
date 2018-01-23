@@ -4,6 +4,8 @@ from model.distributions import GaussianDiagonal, Categorical
 from trainers.sgvb import SGVBWords as SGVB
 from run import RunWords as Run
 
+from distutils.util import strtobool
+
 import numpy as np
 import argparse
 import lasagne
@@ -17,17 +19,23 @@ sys.setrecursionlimit(5000000)
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--vocab-size', default=20000, dest='vocab_size')
-    parser.add_argument('--most-common', default=-1, dest='most_common')
-    parser.add_argument('-min', '--min-length', default=11, dest='restrict_min_length')
-    parser.add_argument('-max', '--max-length', default=30, dest='restrict_max_length')
-    parser.add_argument('-dataset', default='BookCorpus')
-    parser.add_argument('--optimal-beta', default=False, dest='optimal_ratio')
+    parser.add_argument('--vocab-size', default=20000, dest='vocab_size', type=int)
+    parser.add_argument('--most-common', default=-1, dest='most_common', type=int)
+    parser.add_argument('--max-iter', default=100000, type=int, dest='max_iter')
+    parser.add_argument('--min', '--min-length', default=11, dest='restrict_min_length', type=int)
+    parser.add_argument('--max', '--max-length', default=30, dest='restrict_max_length', type=int)
+    parser.add_argument('--dataset', default='BookCorpus')
+    parser.add_argument('--optimal-beta', default='false', dest='optimal_ratio')
     parser.add_argument('--generative-model', '--gen-model', default='Stanford', dest='generative_model')
-    parser.add_argument('-train', default=True)
-    parser.add_argument('-test', default=True)
+
+    parser.add_argument('--train', default='true')
+    parser.add_argument('--test', default='false')
+    parser.add_argument('--gen-prior', default='false', dest='generate_prior')
+    parser.add_argument('--gen-posterior', default='false', dest='generate_posterior')
+    parser.add_argument('--interpolate-latents', default='false', dest='interpolate_latents')
+
     parser.add_argument('-v', '--verbose', default=True)
-    parser.add_argument('--save-arrays', default=False, dest='save_arrays')
+    parser.add_argument('--save-arrays', default='false', dest='save_arrays')
 
     args = parser.parse_args()
 
@@ -40,23 +48,15 @@ if __name__ == '__main__':
     else:
         raise ValueError('This model is not supported')
 
-    # # Run settingss
-    # vocab_size = 20000  # size of the vocabulary
-    # most_common = 50  # number of most common words
-    # restrict_min_length = 11  # minimum length of the sentence
-    # restrict_max_length = 30  # maximum length of the sentence
-    # optimal_ratio = False  # use the optimal ratio between the expectation and the KL in the ELBO
-    # dataset = 'BookCorpus'
-
     main_dir = '.'
     out_dir = './output/{}/{}{}_{}to{}'.format(args.dataset, GenerativeModel.__name__, args.vocab_size,
                                                args.restrict_min_length, args.restrict_max_length)
-    if int(args.most_common) > 0:
+    if args.most_common > 0:
         out_dir = out_dir + 'Top{}'.format(args.most_common)
     else:
         out_dir = out_dir + 'All'
 
-    if args.optimal_ratio:
+    if bool(strtobool(args.optimal_ratio.lower())):
         out_dir = out_dir + '_OptBeta'
 
     if not os.path.exists(out_dir):
@@ -107,12 +107,17 @@ if __name__ == '__main__':
                      'eos_ind': eos_ind,                                    # index of the EOS token
                      }
 
-    pre_trained = False                                                     # if we already have the parameters
+    # if we already have the parameters
+    if bool(strtobool(args.train.lower())) is False:
+        pre_trained = True
+    else:
+        pre_trained = False
+
     load_param_dir = out_dir                                                # directory with the saved parameters
 
-    train = True                                                            # do not train if we already have the parameters
+    train = bool(strtobool(args.train.lower()))                             # do not train if we already have the parameters
 
-    training_iterations = 200000                                            # number of training iterations
+    training_iterations = args.max_iter                                     # number of training iterations
     training_batch_size = 200                                               # number of sentences per training iteration
     training_num_samples = 1                                                # number of samples per sentence per training iteration
     warm_up = 20000                                                         # number of KL annealing iterations
@@ -129,36 +134,33 @@ if __name__ == '__main__':
     save_params_every = 10000                                               # check-point for parameters saving
 
     # The second part of the settings is task-specific
-    generate_output_prior = True                                            # ???
-    generate_output_posterior = False                                       # ???
-    generate_canvases = False                                               # ???
+    generate_output_prior = bool(strtobool(args.generate_prior.lower()))                  # ???
+    generate_output_posterior = bool(strtobool(args.generate_posterior.lower()))          # ???
+    generate_canvases = False                                                             # ???
 
-    impute_missing_words = True                                             # ???
-    drop_rate = 0.2                                                         # ???
-    missing_chars_iterations = 500                                          # ???
+    impute_missing_words = False                                                          # ???
+    drop_rate = 0.2                                                                       # ???
+    missing_chars_iterations = 500                                                        # ???
 
-    find_best_matches = True                                                # ???
-    num_best_matches = 20                                                   # ???
-    best_matches_batch_size = 100                                           # ???
+    find_best_matches = False                                                             # ???
+    num_best_matches = 20                                                                 # ???
+    best_matches_batch_size = 100                                                         # ???
 
-    follow_latent_trajectory = False                                        # ???
-    latent_trajectory_steps = 10                                            # ???
+    follow_latent_trajectory = bool(strtobool(args.interpolate_latents.lower()))          # ???
+    latent_trajectory_steps = 5                                                           # ???
 
-    num_outputs = 100                                                       # ???
+    num_outputs = 100                                                                     # ???
 
-    test = True                                                             # ???
-    test_batch_size = 500                                                   # ???
-    test_num_samples = 100                                                  # ???
-    test_sub_sample_size = 10                                               # ???
+    test = strtobool(args.test.lower())                                                   # ???
+    test_batch_size = 500                                                                 # ???
+    test_num_samples = 100                                                                # ???
+    test_sub_sample_size = 10                                                             # ???
 
-    """
-    Regardless of the task we need:
-    """
-
-    run_kwargs = {'most_common': int(args.most_common),
+    run_kwargs = {'most_common': args.most_common,
                   'exclude_eos': False,
-                  'save_arrays': args.save_arrays}
+                  'save_arrays': bool(strtobool(args.save_arrays.lower()))}
 
+    # Initialise the model
     run = Run(dataset=dataset,                                              # a folder where to read the dataset from
               valid_vocab=valid_vocab,                                      # a valid vocabulary
               solver=solver,                                                # a solver
@@ -173,29 +175,28 @@ if __name__ == '__main__':
               **run_kwargs)                                                 # additional params for the simulation
 
     if train:
-
-        """
-        In case we want to train the model we need:
-        """
-
-        run.train(n_iter=training_iterations,                           # the number of training iterations
-                  batch_size=training_batch_size,                       # number of sentences per batch
-                  num_samples=training_num_samples,                     # number of samples per sentence per training iteration
-                  grad_norm_constraint=grad_norm_constraint,            # to prevent vanishing/exploding gradient
-                  update=update,                                        # the optimisation algorithm
-                  update_kwargs=update_kwargs,                          # parameters for the optimisation algorithm
-                  val_freq=val_freq,                                    # how often to perform evaluation
-                  val_batch_size=val_batch_size,                        # number of sentences per per evaluation iteration
-                  val_num_samples=val_num_samples,                      # number of samples per sentence per evaluation iteration
-                  warm_up=warm_up,                                      # number of KL annealing iterations
-                  optimal_ratio=args.optimal_ratio,                     # use the optimal ratio between the expectation and the KL in the ELBO
-                  save_params_every=save_params_every,                  # check-point for parameters saving
-                  word_drop=word_drop)                                  # percentage of words to drop to prevent vanishing KL term
+        run.train(n_iter=training_iterations,                                   # the number of training iterations
+                  batch_size=training_batch_size,                               # number of sentences per batch
+                  num_samples=training_num_samples,                             # number of samples per sentence per training iteration
+                  grad_norm_constraint=grad_norm_constraint,                    # to prevent vanishing/exploding gradient
+                  update=update,                                                # the optimisation algorithm
+                  update_kwargs=update_kwargs,                                  # parameters for the optimisation algorithm
+                  val_freq=val_freq,                                            # how often to perform evaluation
+                  val_batch_size=val_batch_size,                                # number of sentences per per evaluation iteration
+                  val_num_samples=val_num_samples,                              # number of samples per sentence per evaluation iteration
+                  warm_up=warm_up,                                              # number of KL annealing iterations
+                  optimal_ratio=bool(strtobool(args.optimal_ratio.lower())),    # use the optimal ratio between the expectation and the KL in the ELBO
+                  save_params_every=save_params_every,                          # check-point for parameters saving
+                  word_drop=word_drop)                                          # percentage of words to drop to prevent vanishing KL term
 
     if generate_output_prior or generate_output_posterior:
         run.generate_output(prior=generate_output_prior,
                             posterior=generate_output_posterior,
                             num_outputs=num_outputs)
+
+    if follow_latent_trajectory:
+        run.follow_latent_trajectory(num_samples=num_outputs,
+                                     num_steps=latent_trajectory_steps)
 
     if test:
         run.test(test_batch_size, test_num_samples, test_sub_sample_size)
@@ -212,7 +213,3 @@ if __name__ == '__main__':
         run.find_best_matches(num_outputs=num_outputs,
                               num_matches=num_best_matches,
                               batch_size=best_matches_batch_size)
-
-    if follow_latent_trajectory:
-        run.follow_latent_trajectory(num_samples=num_outputs,
-                                     num_steps=latent_trajectory_steps)

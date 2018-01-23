@@ -1,7 +1,9 @@
+import theano.tensor as T
 import numpy as np
 import theano
-import theano.tensor as T
+
 from lasagne.updates import norm_constraint
+from model.generative_models import GenAUTRWords
 
 
 class SGVBWords(object):
@@ -129,11 +131,10 @@ class SGVBWords(object):
         else:
             x_embedded_dropped = x_embedded * T.shape_padright(drop_mask)                               # N x max(L) x E
 
-
         log_p_x = self.generative_model.log_p_x(x, x_embedded, x_embedded_dropped, z, self.all_embeddings)  # S x N
 
         if optimal_ratio:
-            elbo = T.sum((1. / num_samples) * log_p_x) - T.sum(kl)/2
+            elbo = T.sum((2. / num_samples) * log_p_x) - T.sum(kl)
         else:
             if beta is None:
                 elbo = T.sum((1. / num_samples) * log_p_x) - T.sum(kl)
@@ -219,8 +220,11 @@ class SGVBWords(object):
         :return:                    ...
         """
 
-        outputs, updates = self.generative_model.generate_output_prior(self.all_embeddings, num_samples, beam_size,
-                                                                       num_time_steps)
+        if isinstance(self.generative_model, GenAUTRWords):
+            outputs, updates = self.generative_model.generate_output_prior(self.all_embeddings, num_samples, beam_size,
+                                                                           num_time_steps)
+        else:
+            outputs, updates = self.generative_model.generate_output_prior(self.all_embeddings, num_samples, beam_size)
 
         return theano.function(inputs=[],
                                outputs=outputs,

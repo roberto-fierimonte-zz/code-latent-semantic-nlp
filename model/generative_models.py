@@ -1,19 +1,15 @@
-import theano
-import theano.tensor as T
-
-import numpy as np
-
-from collections import OrderedDict
-
 from lasagne.layers import DenseLayer, get_all_param_values, get_all_params, get_output, InputLayer, LSTMLayer, \
     RecurrentLayer, set_all_param_values, BiasLayer, NonlinearityLayer, ConcatLayer, ElemwiseMergeLayer
-
-from nn.layers import CanvasRNNLayer
-from nn.nonlinearities import sigmoid
+from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
+from collections import OrderedDict
 
 from .utilities import last_d_softmax
+from nn.nonlinearities import sigmoid
+from nn.layers import CanvasRNNLayer
 
-from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
+import theano.tensor as T
+import numpy as np
+import theano
 
 random = RandomStreams()
 
@@ -350,6 +346,21 @@ class GenStanfordWords(object):
 
         return x_sampled[-1], x_argmax[-1], updates
 
+    def generate_output_prior(self, all_embeddings, num_samples, beam_size):
+
+        z = self.dist_z.get_samples(dims=[1, self.z_dim], num_samples=num_samples)  # S * dim(z)
+
+        x_gen_sampled, x_gen_argmax, updates = self.generate_text(z, all_embeddings)
+
+        x_gen_beam = self.beam_search(z, all_embeddings, beam_size)
+
+        # _, attention = self.get_canvases(z, num_time_steps)
+        attention = T.zeros((z.shape[0], self.max_length))
+
+        outputs = [z, x_gen_sampled, x_gen_argmax, x_gen_beam, attention]
+
+        return outputs, updates
+
     def generate_output_prior_fn(self, all_embeddings, num_samples, beam_size, num_time_steps=None):
 
         """
@@ -398,6 +409,31 @@ class GenStanfordWords(object):
                                                     )
 
         return generate_output_posterior
+
+    def follow_latent_trajectory_fn(self, all_embeddings, alphas, num_samples, beam_size):
+
+        z1 = self.dist_z.get_samples(dims=[1, self.z_dim], num_samples=num_samples)  # S * dim(z)
+        z2 = self.dist_z.get_samples(dims=[1, self.z_dim], num_samples=num_samples)  # S * dim(z)
+
+        z1_rep = T.extra_ops.repeat(z1, alphas.shape[0], axis=0)  # (S*A) * dim(z)
+        z2_rep = T.extra_ops.repeat(z2, alphas.shape[0], axis=0)  # (S*A) * dim(z)
+
+        alphas_rep = T.tile(alphas, num_samples)  # (S*A)
+
+        z = (T.shape_padright(alphas_rep) * z1_rep) + (T.shape_padright(T.ones_like(alphas_rep) - alphas_rep) * z2_rep)
+        # (S*A) * dim(z)
+
+        x_gen_sampled, x_gen_argmax, updates = self.generate_text(z, all_embeddings)
+
+        x_gen_beam = self.beam_search(z, all_embeddings, beam_size)
+
+        follow_latent_trajectory = theano.function(inputs=[alphas],
+                                                   outputs=[x_gen_sampled, x_gen_argmax, x_gen_beam],
+                                                   updates=updates,
+                                                   allow_input_downcast=True
+                                                   )
+
+        return follow_latent_trajectory
 
     def find_best_matches_fn(self, sentences_in, sentences_eval, sentences_eval_embedded, z, all_embeddings):
 

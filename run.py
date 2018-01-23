@@ -18,6 +18,7 @@ logger = logging.getLogger('RunWords')
 logger.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(message)s')
 
+
 class RunWords(object):
 
     def __init__(self, solver, solver_kwargs, valid_vocab, main_dir, out_dir, dataset, load_param_dir=None,
@@ -243,6 +244,28 @@ class RunWords(object):
 
         return out
 
+    def print_latent_trajectory(self, latent_trajectory):
+
+        x_gen_sampled = latent_trajectory['generated_x_sampled_traj']
+        x_gen_argmax = latent_trajectory['generated_x_argmax_traj']
+        x_gen_beam = latent_trajectory['generated_x_beam_traj']
+
+        print('=' * 10)
+
+        for n in range(x_gen_sampled.shape[0]):
+            print('=' * 5)
+
+            print('gen x sampled: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_sampled[n]]))
+            print(' gen x argmax: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_argmax[n]]))
+            print('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))
+            logger.info('gen x sampled: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_sampled[n]]))
+            logger.info(' gen x argmax: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_argmax[n]]))
+            logger.info('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))
+
+            print('-' * 10)
+
+        print('=' * 10)
+
     def print_output_prior(self, output_prior):
 
         x_gen_sampled = output_prior['generated_x_sampled_prior']
@@ -300,12 +323,12 @@ class RunWords(object):
         for n in range(x.shape[0]):
 
             print('       true x: ' + ' '.join([valid_vocab_for_true[i] for i in x[n]]).strip())
-            print(' meaningful x: ' + ' '.join([valid_vocab_for_true[i] for i in x_m[n]]).strip())
+            print(' restricted x: ' + ' '.join([valid_vocab_for_true[i] for i in x_m[n]]).strip())
             print('gen x sampled: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_sampled[n]]))
             print(' gen x argmax: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_argmax[n]]))
             print('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))
             logger.info('       true x: ' + ' '.join([valid_vocab_for_true[i] for i in x[n]]).strip())
-            logger.info(' meaningful x: ' + ' '.join([valid_vocab_for_true[i] for i in x_m[n]]).strip())
+            logger.info(' restricted x: ' + ' '.join([valid_vocab_for_true[i] for i in x_m[n]]).strip())
             logger.info('gen x sampled: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_sampled[n]]))
             logger.info(' gen x argmax: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_argmax[n]]))
             logger.info('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))
@@ -520,6 +543,8 @@ class RunWords(object):
 
             output_prior = self.call_generate_output_prior(generate_output_prior)
 
+            self.print_output_prior(output_prior)
+
             for key, value in output_prior.items():
                 np.save(os.path.join(self.out_dir, key + '.npy'), value)
 
@@ -537,6 +562,8 @@ class RunWords(object):
                 meaningful_mask = None
 
             output_posterior = self.call_generate_output_posterior(generate_output_posterior, batch_in, meaningful_mask)
+
+            self.print_output_posterior(output_posterior)
 
             for key, value in output_posterior.items():
                 np.save(os.path.join(self.out_dir, key + '.npy'), value)
@@ -699,7 +726,8 @@ class RunWords(object):
 
         step_size = 1. / (num_steps - 1)
 
-        alphas = np.arange(0., 1. + step_size, step_size)
+        # alphas = np.arange(0., 1. + step_size, step_size)
+        alphas = np.arange(0., 1. + 1e-10, step_size)
 
         x_gen_sampled, x_gen_argmax, x_gen_beam = follow_latent_trajectory(alphas)
 
@@ -708,6 +736,8 @@ class RunWords(object):
         out['generated_x_sampled_traj'] = x_gen_sampled
         out['generated_x_argmax_traj'] = x_gen_argmax
         out['generated_x_beam_traj'] = x_gen_beam
+
+        self.print_latent_trajectory(out)
 
         for key, value in out.items():
             np.save(os.path.join(self.out_dir, key + '.npy'), value)
