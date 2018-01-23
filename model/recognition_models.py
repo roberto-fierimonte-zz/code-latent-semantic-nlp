@@ -362,3 +362,120 @@ class RecRNN(RecModel):
 
         set_all_param_values(get_all_layers(self.rnn), rnn_params_vals)
         set_all_param_values(get_all_layers([self.mean_nn, self.cov_nn]), nn_params_vals)
+
+
+class RecMLP(RecModel):
+    """ Implementation of a Feed-forward Neural Network Recognition model"""
+
+    def __init__(self, z_dim, max_length, vocab_size, dist_z, **nn_kwargs):
+        """
+
+        :param z_dim:
+        :param max_length:
+        :param vocab_size:
+        :param dist_z:
+        :param nn_kwargs:
+        """
+
+        self.nn_nn_depth = nn_kwargs['nn_depth']  # Number of MLPs to stack
+        self.nn_nn_hid_units = nn_kwargs['nn_hid_units']  # Dimensionality of the hidden layers of the MLPs
+        self.nn_nn_hid_nonlinearity = nn_kwargs['nn_hid_nonlinearity']  # Non-linearity function of the MLPs
+
+        super().__init__(z_dim, max_length, vocab_size, dist_z)
+
+        self.nn = self.nn_fn()
+
+    def nn_fn(self):
+        """ Initialise recognition MLP to compute the mean and the covariance of the code z
+
+        :return: One Lasagne layer for the mean and one for the covariance
+        """
+
+        l_in = InputLayer((None, None))
+
+        l_prev = l_in
+
+        for h in range(self.nn_nn_depth):
+
+            l_prev = DenseLayer(l_prev, num_units=self.nn_nn_hid_units, nonlinearity=self.nn_nn_hid_nonlinearity)
+
+        mean_nn = DenseLayer(l_prev, num_units=self.z_dim, nonlinearity=linear)
+
+        cov_nn = DenseLayer(l_prev, num_units=self.z_dim, nonlinearity=elu_plus_one)
+
+        return mean_nn, cov_nn
+
+    def get_hid(self, X, X_embedded):
+        """ Get the hidden layers for the recognition RNN given a batch of N sentences
+
+        :param X:               (N x max(L)) matrix representing the text
+        :param X_embedded:      (N x max(L) x E) tensor representing the embedded text
+
+        :return:                rnn_depth -dimensional list of hidden states for the recognition RNN
+        """
+
+        # If x is less or equal than 0 then return 0, else 1 (exclude unused words)
+        mask = T.switch(T.lt(X, 0), 0, 1)                                           # N x max(L)
+
+        h_prev = X_embedded                                                         # N x max(L) x E
+
+        all_h = []
+
+        for h in range(len(self.rnn)):
+
+            h_prev = self.rnn[h].get_output_for([h_prev, mask])                     # N x max(L) x dim(hid)
+
+            all_h.append(h_prev[:, -1])
+
+        hid = T.concatenate(all_h, axis=-1)
+
+        return hid
+
+    def get_means_and_covs(self, X, X_embedded):
+        """ Get the mean and the covariance for the distribution for the code z for the RNN-MLP model
+
+        :param X:               (N x max(L)) matrix representing the text
+        :param X_embedded:      (N x max(L) x E) tensor representing the embedded text
+        :return:                ((S * N) x Z) matrix of samples (S samples per sentence)
+        """
+
+        hid = self.get_hid(X, X_embedded)                                           # N x (depth * dim(hid))
+
+        means = get_output(self.mean_nn, hid)                                       # N x Z
+        covs = get_output(self.cov_nn, hid)                                         # N x Z
+
+        return means, covs
+
+    def get_params(self):
+        """
+
+        :return:
+        """
+
+        rnn_params = get_all_params(get_all_layers(self.rnn), trainable=True)
+        nn_params = get_all_params(get_all_layers([self.mean_nn, self.cov_nn]), trainable=True)
+
+        return rnn_params + nn_params
+
+    def get_param_values(self):
+        """
+
+        :return:
+        """
+
+        rnn_params_vals = get_all_param_values(get_all_layers(self.rnn))
+        nn_params_vals = get_all_param_values(get_all_layers([self.mean_nn, self.cov_nn]))
+
+        return [rnn_params_vals, nn_params_vals]
+
+    def set_param_values(self, param_values):
+        """
+
+        :param param_values:
+        :return:
+        """
+
+        [rnn_params_vals, nn_params_vals] = param_values
+
+        set_all_param_values(get_all_layers(self.rnn), rnn_params_vals)
+        set_all_param_values(get_all_layers([self.mean_nn, self.cov_nn]), nn_params_vals)
