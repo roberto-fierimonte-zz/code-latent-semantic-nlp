@@ -12,6 +12,7 @@ from datetime import datetime
 from data_processing.utilities import chunker
 
 from model.generative_models import *
+from model.recognition_models import RecMLP
 
 logger = logging.getLogger('RunWords')
 logger.setLevel(logging.DEBUG)
@@ -41,7 +42,7 @@ class RunWords(object):
 
         # Load the data when the training procedure is initialised
         self.X_train, self.X_test, self.L_train, self.L_test, self.meaningful_mask_train, self.meaningful_mask_test, \
-            solver_kwargs['most_common'] = self.load_data(dataset, train_prop, restrict_min_length, restrict_max_length, **kwargs)
+            self.most_common = self.load_data(dataset, train_prop, restrict_min_length, restrict_max_length, **kwargs)
 
         print('# training sentences = ' + str(len(self.L_train)))
         print('# test sentences = ' + str(len(self.L_test)))
@@ -50,6 +51,13 @@ class RunWords(object):
 
         # Get the actual maximum length of all the sentences
         self.max_length = np.concatenate((self.X_train, self.X_test), axis=0).shape[1]
+
+        if self.most_common is not None:
+            self.most_common.append(solver_kwargs['eos_ind'])
+            solver_kwargs['most_common'] = self.most_common
+        else:
+            self.most_common = [solver_kwargs['eos_ind']]
+            solver_kwargs['most_common'] = self.most_common
 
         # Initialise the Variational method used to solve the model (SGVB)
         self.vb = solver(max_length=self.max_length, **self.solver_kwargs)
@@ -176,7 +184,7 @@ class RunWords(object):
             #     meaningful_mask_test = np.int32(meaningful_mask[~training_mask])
         else:
             # meaningful_mask = np.full((len(words), max_L), 1)
-            most_common = []
+            most_common = None
             meaningful_mask_train = None
             meaningful_mask_test = None
 
@@ -228,10 +236,7 @@ class RunWords(object):
 
         x_m = self.vb.recognition_model.get_meaningful_words(x, meaningful_mask)
 
-        if drop_mask is None:
-            return optimiser(x, x_m, beta)
-        else:
-            return optimiser(x, x_m, beta, drop_mask)
+        return optimiser(x, x_m, beta, drop_mask)
 
         # return optimiser(x, x_m, beta, drop_mask)
 
@@ -348,6 +353,28 @@ class RunWords(object):
 
     # From here onwards, each function performs a different task
 
+    @staticmethod
+    def frequency_vec(x, exclude, max_index):
+        """
+
+        :param x:
+        :param exclude:
+        :param max_index:
+        :return:
+        """
+
+        def array_to_list(array):
+            c = Counter(array[(array >= 0) & (~np.in1d(array, exclude))])
+            l = np.zeros((max_index + 1), dtype=np.float32)
+            l[list(c.keys())] = list(c.values())
+            return l
+
+        khot = np.array(list(map(lambda row: array_to_list(row), x)))
+        if exclude is None:
+            return khot
+        else:
+            return np.delete(arr=khot, axis=1, obj=exclude)
+
     def train(self, n_iter, batch_size, num_samples, word_drop=None, grad_norm_constraint=None, update=adam,
               update_kwargs=None, warm_up=None, optimal_ratio=False, val_freq=None, val_batch_size=0, val_num_samples=0,
               val_print_gen=5, val_beam_size=15, save_params_every=None):
@@ -408,14 +435,18 @@ class RunWords(object):
                 meaningful_mask = None
 
             # Perform training iteration using the current settings (now with meaningful_mask)
-            elbo, kl, pp = self.call_optimiser(optimiser, batch, beta, drop_mask, meaningful_mask)
+            if isinstance(self.vb.recognition_model, RecMLP):
+                batch_freq = self.frequency_vec(batch, self.most_common, self.vocab_size + 1)
+                elbo, kl, pp = self.call_optimiser(optimiser, batch_freq, beta, drop_mask, None)
+            else:
+                elbo, kl, pp = self.call_optimiser(optimiser, batch, beta, drop_mask, meaningful_mask)
 
-            print('Iteration ' + str(i + 1) + ': ELBO = ' + str(elbo/batch_size) + ' (KL = ' + str(kl/batch_size) +\
-                  ') per data point (PP = ' + str(pp) + ') (time taken = ' + str(time.clock() - start) +\
+            print('Iteration ' + str(i + 1) + ': ELBO = ' + str(elbo/batch_size) + ' (KL = ' + str(kl/batch_size) +
+                  ') per data point (PP = ' + str(pp) + ') (time taken = ' + str(time.clock() - start) +
                   ' seconds)')
-            logger.info('Iteration ' + str(i + 1) + ': ELBO = ' + str(elbo / batch_size) + ' (KL = ' + str(kl / batch_size) + \
-                  ') per data point (PP = ' + str(pp) + ') (time taken = ' + str(time.clock() - start) + \
-                  ' seconds)')
+            logger.info('Iteration ' + str(i + 1) + ': ELBO = ' + str(elbo / batch_size) + ' (KL = ' + str(kl / batch_size) +
+                        ') per data point (PP = ' + str(pp) + ') (time taken = ' + str(time.clock() - start) +
+                        ' seconds)')
 
             if val_freq is not None and i % val_freq == 0:
 
@@ -647,9 +678,10 @@ class RunWords(object):
             prop_correct_words = float(num_correct_words) / num_missing_words
 
             print('Missing words iteration ' + str(i + 1) + ': prop correct words = ' + str(prop_correct_words) +
-                  ' (time taken = ' + str(time.clock() - start) + ' seconds)')
+                  ' (correct words = ' + str(num_correct_words) + ', missing words = ' + str(num_missing_words) +
+                  ') (time taken = ' + str(time.clock() - start) + ' seconds)')
             logger.info('Missing words iteration ' + str(i + 1) + ': prop correct words = ' + str(prop_correct_words) +
-                  ' (time taken = ' + str(time.clock() - start) + ' seconds)')
+                        ' (time taken = ' + str(time.clock() - start) + ' seconds)')
 
             print(' ')
 

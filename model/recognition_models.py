@@ -2,8 +2,6 @@ import theano
 import numpy as np
 import theano.tensor as T
 
-from collections import Counter
-
 from lasagne.layers import DenseLayer, get_all_layers, get_all_param_values, get_all_params, get_output, InputLayer, \
     LSTMLayer, set_all_param_values
 from lasagne.nonlinearities import linear
@@ -363,14 +361,14 @@ class RecRNN(RecModel):
 class RecMLP(RecModel):
     """ Implementation of a Feed-forward Neural Network Recognition model"""
 
-    def __init__(self, z_dim, max_length, vocab_size, dist_z, most_common_idx, nn_kwargs):
+    def __init__(self, z_dim, max_length, vocab_size, dist_z, most_common, nn_kwargs):
         """
 
         :param z_dim:
         :param max_length:
         :param vocab_size:
         :param dist_z:
-        :param most_common_idx:
+        :param most_common:
         :param nn_kwargs:
         """
 
@@ -378,30 +376,16 @@ class RecMLP(RecModel):
         self.nn_nn_hid_units = nn_kwargs['nn_hid_units']  # Dimensionality of the hidden layers of the MLPs
         self.nn_nn_hid_nonlinearity = nn_kwargs['nn_hid_nonlinearity']  # Non-linearity function of the MLPs
 
-        self.most_common_idx = most_common_idx
+        self.most_common = most_common
 
-        if self.most_common_idx is None:
+        if self.most_common is None:
             self.input_size = vocab_size + 1
         else:
-            self.input_size = vocab_size + 1 - len(self.most_common_idx)
+            self.input_size = vocab_size - len(self.most_common) + 1
 
         super().__init__(z_dim, max_length, vocab_size, dist_z)
 
         self.nn = self.nn_fn()
-
-    def frequency_vec(self, x):
-
-        def array_to_list(array, max_index):
-            c = Counter(array[array > 0])
-            l = np.zeros(max_index)
-            l[list(c.keys())] = list(c.values())
-            return l
-
-        khot = np.array(list(map(lambda row: array_to_list(row, self.vocab_size), x)))
-        if self.most_common_idx is None:
-            return khot
-        else:
-            return np.delete(arr=khot, axis=1, obj=self.most_common_idx)
 
     def nn_fn(self):
         """ Initialise recognition MLP to compute the mean and the covariance of the code z
@@ -423,27 +407,15 @@ class RecMLP(RecModel):
 
         return mean_nn, cov_nn
 
-    def get_means_and_covs(self, X, X_embedded):
+    def get_means_and_covs(self, X, *_):
         """ Get the mean and the covariance for the distribution for the code z for the RNN-MLP model
 
-        :param X:               (N x max(L)) matrix representing the text
-        :param X_embedded:      (N x max(L) x E) tensor representing the embedded text
+        :param X:
         :return:                ((S * N) x Z) matrix of samples (S samples per sentence)
         """
 
-        def ged(self):
-
-            zeros = T.zeros((1, self.input_size), dtype=np.int32)
-
-
-        # If x is less or equal than 0 then return 0, else 1 (used to filter out words)
-        mask = T.switch(T.lt(X, 0), 0, 1)  # N x max(L)
-
-        # Reshape the embedding of X adding a singleton dimension on the right
-        X_embedded *= T.shape_padright(mask)
-
-        means = get_output(self.mean_nn, X_embedded)                                       # N x Z
-        covs = get_output(self.cov_nn, X_embedded)                                         # N x Z
+        means = get_output(self.mean_nn, T.cast(X, 'float32'))                                       # N x Z
+        covs = get_output(self.cov_nn, T.cast(X, 'float32'))                                         # N x Z
 
         return means, covs
 

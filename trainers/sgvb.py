@@ -74,7 +74,7 @@ class SGVBWords(object):
         if recognition_model.__name__ != 'RecMLP':
             return recognition_model(self.z_dim, self.max_length, self.embedding_dim, self.dist_z_rec, self.rec_nn_kwargs)
         else:
-            return recognition_model(self.z_dim, self.max_length, self.embedding_dim, self.dist_z_rec, self.most_common_idx,
+            return recognition_model(self.z_dim, self.max_length, self.vocab_size, self.dist_z_rec, self.most_common_idx,
                                      self.rec_nn_kwargs)
 
     def embedder(self, x, all_embeddings):
@@ -142,7 +142,7 @@ class SGVBWords(object):
 
         z, kl = self.recognition_model.get_samples_and_kl_std_gaussian(x_m, x_m_embedded, num_samples)      # ((S * N) x Z) and (N x 1)
 
-        if drop_mask is None:
+        if drop_mask is None or isinstance(self.recognition_model, RecMLP):
             x_embedded_dropped = x_embedded                                                                 # N x max(L) x E
         else:
             x_embedded_dropped = x_embedded * T.shape_padright(drop_mask)                                   # N x max(L) x E
