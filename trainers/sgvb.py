@@ -4,6 +4,7 @@ import theano
 
 from lasagne.updates import norm_constraint
 from model.generative_models import GenAUTRWords
+from model.recognition_models import RecMLP
 
 
 class SGVBWords(object):
@@ -11,7 +12,7 @@ class SGVBWords(object):
     """
 
     def __init__(self, generative_model, recognition_model, z_dim, max_length, vocab_size, embedding_dim, dist_z_gen,
-                 dist_x_gen, dist_z_rec, gen_nn_kwargs, rec_nn_kwargs, eos_ind):
+                 dist_x_gen, dist_z_rec, gen_nn_kwargs, rec_nn_kwargs, eos_ind, most_common):
         """
 
         :param generative_model:        # class of the generative model
@@ -32,6 +33,7 @@ class SGVBWords(object):
         self.max_length = max_length
         self.vocab_size = vocab_size
         self.embedding_dim = embedding_dim
+        self.most_common_idx = set(most_common).add(eos_ind)
 
         # Creates a V x E embedding matrix of samples from the Normal distribution with 0 Mean and 0.1 StD
         # This is an updatable variable (theano concept of "current value" and "update")
@@ -69,7 +71,11 @@ class SGVBWords(object):
         :return:                    initialised recognition model
         """
 
-        return recognition_model(self.z_dim, self.max_length, self.embedding_dim, self.dist_z_rec, self.rec_nn_kwargs)
+        if recognition_model.__name__ != 'RecMLP':
+            return recognition_model(self.z_dim, self.max_length, self.embedding_dim, self.dist_z_rec, self.rec_nn_kwargs)
+        else:
+            return recognition_model(self.z_dim, self.max_length, self.embedding_dim, self.dist_z_rec, self.most_common_idx,
+                                     self.rec_nn_kwargs)
 
     def embedder(self, x, all_embeddings):
         """ Embed a sentence using the current embeddings
@@ -85,6 +91,16 @@ class SGVBWords(object):
 
         # Returns the embedding for the sentence
         return all_embeddings[x]
+
+    def bag_of_words(self, x):
+        """
+
+        :param x:
+        :return:
+        """
+
+
+        return
 
     def cut_off(self, x):
         """
@@ -121,15 +137,15 @@ class SGVBWords(object):
         :return:                scalar and scalar and scalar
         """
 
-        x_embedded = self.embedder(x, self.all_embeddings)                                              # N x max(L) x E
-        x_m_embedded = self.embedder(x_m, self.all_embeddings)                                          # N x max(L) x E
+        x_embedded = self.embedder(x, self.all_embeddings)                                                  # N x max(L) x E
+        x_m_embedded = self.embedder(x_m, self.all_embeddings)                                              # N x max(L) x E
 
-        z, kl = self.recognition_model.get_samples_and_kl_std_gaussian(x_m, x_m_embedded, num_samples)  # ((S * N) x Z) and (N x 1)
+        z, kl = self.recognition_model.get_samples_and_kl_std_gaussian(x_m, x_m_embedded, num_samples)      # ((S * N) x Z) and (N x 1)
 
         if drop_mask is None:
-            x_embedded_dropped = x_embedded                                                             # N x max(L) x E
+            x_embedded_dropped = x_embedded                                                                 # N x max(L) x E
         else:
-            x_embedded_dropped = x_embedded * T.shape_padright(drop_mask)                               # N x max(L) x E
+            x_embedded_dropped = x_embedded * T.shape_padright(drop_mask)                                   # N x max(L) x E
 
         log_p_x = self.generative_model.log_p_x(x, x_embedded, x_embedded_dropped, z, self.all_embeddings)  # S x N
 

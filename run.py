@@ -12,7 +12,6 @@ from datetime import datetime
 from data_processing.utilities import chunker
 
 from model.generative_models import *
-from process_dataset import tf_idf
 
 logger = logging.getLogger('RunWords')
 logger.setLevel(logging.DEBUG)
@@ -41,8 +40,8 @@ class RunWords(object):
         self.vocab_size = solver_kwargs['vocab_size']
 
         # Load the data when the training procedure is initialised
-        self.X_train, self.X_test, self.L_train, self.L_test, self.meaningful_mask_train, self.meaningful_mask_test = \
-            self.load_data(dataset, train_prop, restrict_min_length, restrict_max_length, **kwargs)
+        self.X_train, self.X_test, self.L_train, self.L_test, self.meaningful_mask_train, self.meaningful_mask_test, \
+            solver_kwargs['most_common'] = self.load_data(dataset, train_prop, restrict_min_length, restrict_max_length, **kwargs)
 
         print('# training sentences = ' + str(len(self.L_train)))
         print('# test sentences = ' + str(len(self.L_test)))
@@ -72,145 +71,150 @@ class RunWords(object):
 
         # Load the dataset
         folder = './data/' + dataset
-        pickle_dir = folder + re.search('(\d{2}to\d{2})((All)|(Top[0-9]*))', self.out_dir).group(0)
-        max_bytes = 2 ** 31 - 1
+        # pickle_dir = folder + re.search('(\d{2}to\d{2})((All)|(Top[0-9]*))', self.out_dir).group(0)
+        # max_bytes = 2 ** 31 - 1
 
-        try:
-            input_size = os.path.getsize(os.path.join(pickle_dir, 'X_train.save'))
-            bytes_in = bytearray(0)
+        # try:
+        #     pickle_dir = folder + re.search('(\d{2}to\d{2})((All)|(Top[0-9]*))', self.out_dir).group(0)
+        #     input_size = os.path.getsize(os.path.join(pickle_dir, 'X_train.save'))
+        #     bytes_in = bytearray(0)
+        #
+        #     with open(os.path.join(pickle_dir, 'X_train.save'), 'rb') as f1:
+        #         for _ in range(0, input_size, max_bytes):
+        #             bytes_in += f1.read(max_bytes)
+        #         X_train = cPickle.loads(bytes_in)
+        #
+        #     input_size = os.path.getsize(os.path.join(pickle_dir, 'mask_train.save'))
+        #     bytes_in = bytearray(0)
+        #
+        #     with open(os.path.join(pickle_dir, 'mask_train.save'), 'rb') as f5:
+        #         for _ in range(0, input_size, max_bytes):
+        #             bytes_in += f5.read(max_bytes)
+        #         mask_train = cPickle.loads(bytes_in)
+        #
+        #
+        #     with open(os.path.join(pickle_dir, 'X_test.save'), 'rb') as f2, open(os.path.join(pickle_dir, 'L_train.save'), 'rb') as f3, \
+        #          open(os.path.join(pickle_dir, 'L_test.save'), 'rb') as f4, open(os.path.join(pickle_dir, 'mask_test.save'), 'rb') as f6, \
+        #          open(os.path.join(pickle_dir, 'most_common.save'), 'rb') as f7:
+        #
+        #         X_test = cPickle.load(f2)
+        #         L_train = cPickle.load(f3)
+        #         L_test = cPickle.load(f4)
+        #         mask_test = cPickle.load(f6)
+        #         most_common = cPickle.load(f7)
+        #
+        #         return X_train, X_test, L_train, L_test, mask_train, mask_test, most_common
+        #
+        # except (FileNotFoundError, AttributeError):
 
-            with open(os.path.join(pickle_dir, 'X_train.save'), 'rb') as f1:
-                for _ in range(0, input_size, max_bytes):
-                    bytes_in += f1.read(max_bytes)
-                X_train = cPickle.loads(bytes_in)
+        files = []
+        for f in os.listdir(folder):
 
-            input_size = os.path.getsize(os.path.join(pickle_dir, 'mask_train.save'))
-            bytes_in = bytearray(0)
+            try:
+                lower = int(f[:f.find('-')])
+                upper = int(f[f.find('-')+1:f.find('.')])
+            except:
+                continue
 
-            with open(os.path.join(pickle_dir, 'mask_train.save'), 'rb') as f5:
-                for _ in range(0, input_size, max_bytes):
-                    bytes_in += f5.read(max_bytes)
-                mask_train = cPickle.loads(bytes_in)
-
-
-            with open(os.path.join(pickle_dir, 'X_test.save'), 'rb') as f2, open(os.path.join(pickle_dir, 'L_train.save'), 'rb') as f3, \
-                 open(os.path.join(pickle_dir, 'L_test.save'), 'rb') as f4, open(os.path.join(pickle_dir, 'mask_test.save'), 'rb') as f6:
-
-                X_test = cPickle.load(f2)
-                L_train = cPickle.load(f3)
-                L_test = cPickle.load(f4)
-                mask_test = cPickle.load(f6)
-
-                return X_train, X_test, L_train, L_test, mask_train, mask_test
-
-        except Exception:
-            files = []
-            for f in os.listdir(folder):
-
-                try:
-                    lower = int(f[:f.find('-')])
-                    upper = int(f[f.find('-')+1:f.find('.')])
-                except:
-                    continue
-
-                if lower > restrict_max_length or upper < restrict_min_length:
-                    continue
-                else:
-                    files.append(f)
-
-            c = Counter()
-            words = []
-
-            eos_ind = self.valid_vocab.index('<EOS>')
-            for f in files:
-
-                with open(os.path.join(self.main_dir, folder, f), 'r') as d:
-                    words_d = d.read()
-                    new_words = json.loads(words_d)
-                    words += new_words
-                    if 'most_common' in kwargs:
-                        for w in new_words:
-                            c.update(w)
-
-            L = np.array([len(s) for s in words])
-            max_L = max(L)
-
-            # We want to identify meaningful words using different approaches
-            # meaningful_mask contains the meaningful_words
-            word_arrays = []
-
-            for i in range(0, len(L), load_batch_size):
-
-                L_i = L[i: i+load_batch_size]
-
-                word_array = np.full((len(L_i), max_L), -1, dtype='int32')
-                word_array[L_i.reshape((L_i.shape[0], 1)) > np.arange(max(L))] = np.concatenate(words[i: i+load_batch_size])
-
-                word_arrays.append(word_array)
-
-                del L_i, word_array
-
-            words_to_return = np.concatenate(word_arrays)
-
-
-            np.random.seed(1234)
-            training_mask = np.random.rand(len(words_to_return)) < train_prop
-
-            if 'most_common' in kwargs and kwargs['most_common'] > 0:
-                most_common = [k for (k, _) in c.most_common(kwargs['most_common'])]
-                if 'exclude_eos' in kwargs and kwargs['exclude_eos'] is True:
-                    pass
-                else:
-                    most_common.remove(eos_ind)
-                meaningful_mask = np.sign(np.isin(words_to_return, most_common, invert=True) - 0.5)
-                meaningful_mask_train = np.int32(meaningful_mask[training_mask])
-                meaningful_mask_test = np.int32(meaningful_mask[~training_mask])
-
-            elif 'tf-idf' in kwargs:
-                meaningful_mask = np.full((len(words), max_L), 1)
-                for i, w in enumerate(words):
-                    meaningful_mask[i, 0:len(w)] = np.sign(~np.in1d(w, [i for i in w if tf_idf(i, w, words) < kwargs['tf-idf']]) - 0.5)
-                meaningful_mask_train = np.int32(meaningful_mask[training_mask])
-                meaningful_mask_test = np.int32(meaningful_mask[~training_mask])
+            if lower > restrict_max_length or upper < restrict_min_length:
+                continue
             else:
-                # meaningful_mask = np.full((len(words), max_L), 1)
-                meaningful_mask_train = None
-                meaningful_mask_test = None
+                files.append(f)
 
-            del words
+        c = Counter()
+        words = []
 
-            if 'save_arrays' in kwargs and kwargs['save_arrays'] is False:
+        eos_ind = self.valid_vocab.index('<EOS>')
+        for f in files:
+
+            with open(os.path.join(self.main_dir, folder, f), 'r') as d:
+                words_d = d.read()
+                new_words = json.loads(words_d)
+                words += new_words
+                if 'most_common' in kwargs:
+                    for w in new_words:
+                        c.update(w)
+
+        L = np.array([len(s) for s in words])
+        max_L = max(L)
+
+        # We want to identify meaningful words using different approaches
+        # meaningful_mask contains the meaningful_words
+        word_arrays = []
+
+        for i in range(0, len(L), load_batch_size):
+
+            L_i = L[i: i+load_batch_size]
+
+            word_array = np.full((len(L_i), max_L), -1, dtype='int32')
+            word_array[L_i.reshape((L_i.shape[0], 1)) > np.arange(max(L))] = np.concatenate(words[i: i+load_batch_size])
+
+            word_arrays.append(word_array)
+
+            del L_i, word_array
+
+        words_to_return = np.concatenate(word_arrays)
+
+        np.random.seed(1234)
+        training_mask = np.random.rand(len(words_to_return)) < train_prop
+
+        if 'most_common' in kwargs and kwargs['most_common'] > 0:
+            most_common = [k for (k, _) in c.most_common(kwargs['most_common'])]
+            if 'exclude_eos' in kwargs and kwargs['exclude_eos'] is True:
                 pass
             else:
-                if not os.path.exists(pickle_dir):
-                    os.makedirs(pickle_dir, exist_ok=True)
+                most_common.remove(eos_ind)
+            meaningful_mask = np.sign(np.isin(words_to_return, most_common, invert=True) - 0.5)
+            meaningful_mask_train = np.int32(meaningful_mask[training_mask])
+            meaningful_mask_test = np.int32(meaningful_mask[~training_mask])
 
-                with open(os.path.join(pickle_dir, 'X_train.save'), 'wb') as file:
-                    bytes_out = cPickle.dumps(words_to_return[training_mask])
-                    n_bytes = sys.getsizeof(bytes_out)
-                    for idx in range(0, n_bytes, max_bytes):
-                        file.write(bytes_out[idx:idx+max_bytes])
+            # elif 'tf-idf' in kwargs:
+            #     meaningful_mask = np.full((len(words), max_L), 1)
+            #     for i, w in enumerate(words):
+            #         meaningful_mask[i, 0:len(w)] = np.sign(~np.in1d(w, [i for i in w if tf_idf(i, w, words) < kwargs['tf-idf']]) - 0.5)
+            #     meaningful_mask_train = np.int32(meaningful_mask[training_mask])
+            #     meaningful_mask_test = np.int32(meaningful_mask[~training_mask])
+        else:
+            # meaningful_mask = np.full((len(words), max_L), 1)
+            most_common = []
+            meaningful_mask_train = None
+            meaningful_mask_test = None
 
-                with open(os.path.join(pickle_dir, 'X_test.save'), 'wb') as file:
-                    cPickle.dump(words_to_return[~training_mask], file, protocol=cPickle.HIGHEST_PROTOCOL)
+        del words
 
-                with open(os.path.join(pickle_dir, 'L_train.save'), 'wb') as file:
-                    cPickle.dump(L[training_mask], file, protocol=cPickle.HIGHEST_PROTOCOL)
+            # if 'save_arrays' in kwargs and kwargs['save_arrays'] is False:
+            #     pass
+            # else:
+            #     pickle_dir = folder + re.search('(\d{2}to\d{2})((All)|(Top[0-9]*))', self.out_dir).group(0)
+            #     if not os.path.exists(pickle_dir):
+            #         os.makedirs(pickle_dir, exist_ok=True)
+            #
+            #     with open(os.path.join(pickle_dir, 'X_train.save'), 'wb') as file:
+            #         bytes_out = cPickle.dumps(words_to_return[training_mask])
+            #         n_bytes = sys.getsizeof(bytes_out)
+            #         for idx in range(0, n_bytes, max_bytes):
+            #             file.write(bytes_out[idx:idx+max_bytes])
+            #
+            #     with open(os.path.join(pickle_dir, 'X_test.save'), 'wb') as file:
+            #         cPickle.dump(words_to_return[~training_mask], file, protocol=cPickle.HIGHEST_PROTOCOL)
+            #
+            #     with open(os.path.join(pickle_dir, 'L_train.save'), 'wb') as file:
+            #         cPickle.dump(L[training_mask], file, protocol=cPickle.HIGHEST_PROTOCOL)
+            #
+            #     with open(os.path.join(pickle_dir, 'L_test.save'), 'wb') as file:
+            #         cPickle.dump(L[~training_mask], file, protocol=cPickle.HIGHEST_PROTOCOL)
+            #
+            #     with open(os.path.join(pickle_dir, 'mask_train.save'), 'wb') as file:
+            #         bytes_out = cPickle.dumps(meaningful_mask_train)
+            #         n_bytes = sys.getsizeof(bytes_out)
+            #         for idx in range(0, n_bytes, max_bytes):
+            #             file.write(bytes_out[idx:idx + max_bytes])
+            #
+            #     with open(os.path.join(pickle_dir, 'mask_test.save'), 'wb') as file:
+            #         cPickle.dump(meaningful_mask_test, file, protocol=cPickle.HIGHEST_PROTOCOL)
 
-                with open(os.path.join(pickle_dir, 'L_test.save'), 'wb') as file:
-                    cPickle.dump(L[~training_mask], file, protocol=cPickle.HIGHEST_PROTOCOL)
-
-                with open(os.path.join(pickle_dir, 'mask_train.save'), 'wb') as file:
-                    bytes_out = cPickle.dumps(meaningful_mask_train)
-                    n_bytes = sys.getsizeof(bytes_out)
-                    for idx in range(0, n_bytes, max_bytes):
-                        file.write(bytes_out[idx:idx + max_bytes])
-
-                with open(os.path.join(pickle_dir, 'mask_test.save'), 'wb') as file:
-                    cPickle.dump(meaningful_mask_test, file, protocol=cPickle.HIGHEST_PROTOCOL)
-
-            return words_to_return[training_mask], words_to_return[~training_mask], L[training_mask], L[~training_mask], \
-                   meaningful_mask_train, meaningful_mask_test
+        return words_to_return[training_mask], words_to_return[~training_mask], L[training_mask], L[~training_mask], \
+               meaningful_mask_train, meaningful_mask_test, most_common
 
     # Compute ELBO using the current validation batch
     def call_elbo_fn(self, elbo_fn, x, meaningful_mask):
@@ -224,7 +228,12 @@ class RunWords(object):
 
         x_m = self.vb.recognition_model.get_meaningful_words(x, meaningful_mask)
 
-        return optimiser(x, x_m, beta, drop_mask)
+        if drop_mask is None:
+            return optimiser(x, x_m, beta)
+        else:
+            return optimiser(x, x_m, beta, drop_mask)
+
+        # return optimiser(x, x_m, beta, drop_mask)
 
     def get_generate_output_prior(self, num_outputs, beam_size):
 
@@ -666,6 +675,8 @@ class RunWords(object):
 
         prop_correct_words = float(num_correct_words) / num_missing_words
 
+        print('correct words = ' + str(num_correct_words))
+        print('missing words = ' + str(num_missing_words))
         print('proportion correct words = ' + str(prop_correct_words))
 
         out = OrderedDict()

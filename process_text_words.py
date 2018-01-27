@@ -7,12 +7,12 @@ from nltk.tokenize import word_tokenize
 
 dataset = 'BookCorpus'
 
-vocab_size = 5000
+vocab_size = 20000
 
-min_len = 1
-max_len = 60
+min_len = 4
+max_len = 500
 len_saving_intervals = 5
-lim_unk = 0.0
+lim_unk = 0.4
 
 files = [os.path.join('./data/', dataset, f) for f in os.listdir(os.path.join('./data/', dataset)) if f.endswith('.txt')]
 

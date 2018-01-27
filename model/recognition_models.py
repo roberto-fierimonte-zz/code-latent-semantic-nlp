@@ -1,6 +1,9 @@
 import theano
 import numpy as np
 import theano.tensor as T
+
+from collections import Counter
+
 from lasagne.layers import DenseLayer, get_all_layers, get_all_param_values, get_all_params, get_output, InputLayer, \
     LSTMLayer, set_all_param_values
 from lasagne.nonlinearities import linear
@@ -55,13 +58,6 @@ class RecModel(object):
             return X_tilde
         else:
             return X
-
-    # def get_meaningful_words_symbolic(self, meaningful_mask):
-    #
-    #     X = T.imatrix('X')
-    #     f =  X * meaningful_mask
-    #
-    #     return theano.function(inputs=[X, meaningful_mask], outputs=f, allow_input_downcast=True)
 
     def get_means_and_covs(self, X, X_embedded):
         """ Get the mean and the covariance for the distribution for the code z
@@ -367,13 +363,14 @@ class RecRNN(RecModel):
 class RecMLP(RecModel):
     """ Implementation of a Feed-forward Neural Network Recognition model"""
 
-    def __init__(self, z_dim, max_length, vocab_size, dist_z, **nn_kwargs):
+    def __init__(self, z_dim, max_length, vocab_size, dist_z, most_common_idx, nn_kwargs):
         """
 
         :param z_dim:
         :param max_length:
         :param vocab_size:
         :param dist_z:
+        :param most_common_idx:
         :param nn_kwargs:
         """
 
@@ -381,17 +378,38 @@ class RecMLP(RecModel):
         self.nn_nn_hid_units = nn_kwargs['nn_hid_units']  # Dimensionality of the hidden layers of the MLPs
         self.nn_nn_hid_nonlinearity = nn_kwargs['nn_hid_nonlinearity']  # Non-linearity function of the MLPs
 
+        self.most_common_idx = most_common_idx
+
+        if self.most_common_idx is None:
+            self.input_size = vocab_size + 1
+        else:
+            self.input_size = vocab_size + 1 - len(self.most_common_idx)
+
         super().__init__(z_dim, max_length, vocab_size, dist_z)
 
         self.nn = self.nn_fn()
 
+    def frequency_vec(self, x):
+
+        def array_to_list(array, max_index):
+            c = Counter(array[array > 0])
+            l = np.zeros(max_index)
+            l[list(c.keys())] = list(c.values())
+            return l
+
+        khot = np.array(list(map(lambda row: array_to_list(row, self.vocab_size), x)))
+        if self.most_common_idx is None:
+            return khot
+        else:
+            return np.delete(arr=khot, axis=1, obj=self.most_common_idx)
+
     def nn_fn(self):
         """ Initialise recognition MLP to compute the mean and the covariance of the code z
 
-        :return: One Lasagne layer for the mean and one for the covariance
+        :return: one Lasagne layer for the mean and one for the covariance
         """
 
-        l_in = InputLayer((None, None))
+        l_in = InputLayer((None, self.input_size))
 
         l_prev = l_in
 
@@ -405,32 +423,6 @@ class RecMLP(RecModel):
 
         return mean_nn, cov_nn
 
-    def get_hid(self, X, X_embedded):
-        """ Get the hidden layers for the recognition RNN given a batch of N sentences
-
-        :param X:               (N x max(L)) matrix representing the text
-        :param X_embedded:      (N x max(L) x E) tensor representing the embedded text
-
-        :return:                rnn_depth -dimensional list of hidden states for the recognition RNN
-        """
-
-        # If x is less or equal than 0 then return 0, else 1 (exclude unused words)
-        mask = T.switch(T.lt(X, 0), 0, 1)                                           # N x max(L)
-
-        h_prev = X_embedded                                                         # N x max(L) x E
-
-        all_h = []
-
-        for h in range(len(self.rnn)):
-
-            h_prev = self.rnn[h].get_output_for([h_prev, mask])                     # N x max(L) x dim(hid)
-
-            all_h.append(h_prev[:, -1])
-
-        hid = T.concatenate(all_h, axis=-1)
-
-        return hid
-
     def get_means_and_covs(self, X, X_embedded):
         """ Get the mean and the covariance for the distribution for the code z for the RNN-MLP model
 
@@ -439,10 +431,19 @@ class RecMLP(RecModel):
         :return:                ((S * N) x Z) matrix of samples (S samples per sentence)
         """
 
-        hid = self.get_hid(X, X_embedded)                                           # N x (depth * dim(hid))
+        def ged(self):
 
-        means = get_output(self.mean_nn, hid)                                       # N x Z
-        covs = get_output(self.cov_nn, hid)                                         # N x Z
+            zeros = T.zeros((1, self.input_size), dtype=np.int32)
+
+
+        # If x is less or equal than 0 then return 0, else 1 (used to filter out words)
+        mask = T.switch(T.lt(X, 0), 0, 1)  # N x max(L)
+
+        # Reshape the embedding of X adding a singleton dimension on the right
+        X_embedded *= T.shape_padright(mask)
+
+        means = get_output(self.mean_nn, X_embedded)                                       # N x Z
+        covs = get_output(self.cov_nn, X_embedded)                                         # N x Z
 
         return means, covs
 
@@ -452,10 +453,9 @@ class RecMLP(RecModel):
         :return:
         """
 
-        rnn_params = get_all_params(get_all_layers(self.rnn), trainable=True)
         nn_params = get_all_params(get_all_layers([self.mean_nn, self.cov_nn]), trainable=True)
 
-        return rnn_params + nn_params
+        return nn_params
 
     def get_param_values(self):
         """
@@ -463,10 +463,9 @@ class RecMLP(RecModel):
         :return:
         """
 
-        rnn_params_vals = get_all_param_values(get_all_layers(self.rnn))
         nn_params_vals = get_all_param_values(get_all_layers([self.mean_nn, self.cov_nn]))
 
-        return [rnn_params_vals, nn_params_vals]
+        return [nn_params_vals]
 
     def set_param_values(self, param_values):
         """
@@ -475,7 +474,6 @@ class RecMLP(RecModel):
         :return:
         """
 
-        [rnn_params_vals, nn_params_vals] = param_values
+        [nn_params_vals] = param_values
 
-        set_all_param_values(get_all_layers(self.rnn), rnn_params_vals)
         set_all_param_values(get_all_layers([self.mean_nn, self.cov_nn]), nn_params_vals)

@@ -1,10 +1,8 @@
 from model.generative_models import GenStanfordWords, GenAUTRWords, GenLatentGateWords
-from model.recognition_models import RecRNN as RecognitionModel
+from model.recognition_models import RecRNN, RecMLP
 from model.distributions import GaussianDiagonal, Categorical
 from trainers.sgvb import SGVBWords as SGVB
 from run import RunWords as Run
-
-from distutils.util import strtobool
 
 import numpy as np
 import argparse
@@ -16,52 +14,84 @@ import os
 np.set_printoptions(threshold=3000000)
 sys.setrecursionlimit(5000000)
 
+
+def check_percentage(value):
+    fvalue = float(value)
+    if fvalue > 1.:
+        fvalue /= 100
+    if fvalue < 0. or fvalue > 1.:
+        raise argparse.ArgumentTypeError("%s is an invalid percentage value" % value)
+    return fvalue
+
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
+
+    # Params of the model
     parser.add_argument('--vocab-size', default=20000, dest='vocab_size', type=int)
-    parser.add_argument('--most-common', default=-1, dest='most_common', type=int)
-    parser.add_argument('--max-iter', default=100000, type=int, dest='max_iter')
+    parser.add_argument('--lim-unk', default=0.0, type=check_percentage)
     parser.add_argument('--min', '--min-length', default=11, dest='restrict_min_length', type=int)
     parser.add_argument('--max', '--max-length', default=30, dest='restrict_max_length', type=int)
-    parser.add_argument('--dataset', default='BookCorpus')
-    parser.add_argument('--optimal-beta', default='false', dest='optimal_ratio')
-    parser.add_argument('--generative-model', '--gen-model', default='Stanford', dest='generative_model')
+    parser.add_argument('--dataset', default='BookCorpus', type=str)
+    parser.add_argument('--generative-model', '--gen-model', '--decoder', default='Stanford', dest='generative_model')
+    parser.add_argument('--recognition-model', '--rec-model', '--encoder', default='LSTM', dest='recognition_model')
 
-    parser.add_argument('--train', default='true')
-    parser.add_argument('--test', default='false')
-    parser.add_argument('--gen-prior', default='false', dest='generate_prior')
-    parser.add_argument('--gen-posterior', default='false', dest='generate_posterior')
-    parser.add_argument('--interpolate-latents', default='false', dest='interpolate_latents')
+    # Params of the training
+    parser.add_argument('--most-common', default=-1, dest='most_common', type=int)
+    parser.add_argument('--max-iter', default=100000, type=int, dest='max_iter')
+    parser.add_argument('--optimal-beta', action='store_true', dest='optimal_ratio')
+    parser.add_argument('--no-word-drop', action='store_true', dest='no_word_drop')
+    parser.add_argument('--no-annealing', action='store_true', dest='no_annealing')
 
+    # Params of the task
+    parser.add_argument('--train', action='store_true')
+    parser.add_argument('--test', action='store_true')
+    parser.add_argument('--pre-trained', action='store_true', dest='pre_trained')
+    parser.add_argument('--gen-prior', action='store_true', dest='generate_prior')
+    parser.add_argument('--gen-posterior', action='store_true', dest='generate_posterior')
+    parser.add_argument('--interpolate-latents', action='store_true', dest='interpolate_latents')
+    parser.add_argument('--impute-missing', '--missing_words', '--missing', '--impute', action='store_true',
+                        dest='impute_missing_words')
+    parser.add_argument('--find-best', '--find-matches', '--best-matches', action='store_true',
+                        dest='find_best_matches')
+
+    # Other params
     parser.add_argument('-v', '--verbose', default=True)
-    parser.add_argument('--save-arrays', default='false', dest='save_arrays')
+    parser.add_argument('--save-arrays', action='store_true', dest='save_arrays')
 
     args = parser.parse_args()
 
-    if args.generative_model == 'Stanford':
+    if args.generative_model in ['Stanford', 'LSTM']:
         GenerativeModel = GenStanfordWords
-    elif args.generative_model == 'AUTR':
+    elif args.generative_model in ['AUTR', 'Canvas']:
         GenerativeModel = GenAUTRWords
     elif args.generative_model == 'TopicRNN':
         GenerativeModel = GenLatentGateWords
     else:
-        raise ValueError('This model is not supported')
+        raise ValueError('{} is not a valid generative model'.format(args.generative_model))
+
+    if args.recognition_model == 'LSTM':
+        RecognitionModel = RecRNN
+    elif args.recognition_model in ['MLP', 'FNN', 'NN']:
+        RecognitionModel = RecMLP
+    else:
+        raise ValueError('{} is not a valid recognition model'.format(args.recognition_model))
 
     main_dir = '.'
-    out_dir = './output/{}/{}{}_{}to{}'.format(args.dataset, GenerativeModel.__name__, args.vocab_size,
-                                               args.restrict_min_length, args.restrict_max_length)
+    out_dir = './output/{}/{}_{}_{}_{}to{}'.format(args.dataset, GenerativeModel.__name__, RecognitionModel.__name__,
+                                                   args.vocab_size, args.restrict_min_length, args.restrict_max_length)
     if args.most_common > 0:
         out_dir = out_dir + 'Top{}'.format(args.most_common)
     else:
         out_dir = out_dir + 'All'
 
-    if bool(strtobool(args.optimal_ratio.lower())):
+    if args.optimal_ratio:
         out_dir = out_dir + '_OptBeta'
 
     if not os.path.exists(out_dir):
         os.makedirs(out_dir, exist_ok=True)
-    dataset = '{}/processed_vocab{}_1to60_limunk0.0'.format(args.dataset, args.vocab_size)  # dataset folder
+    dataset = '{}/processed_vocab{}_1to60_limunk{}'.format(args.dataset, args.vocab_size, args.lim_unk)  # dataset folder
 
     with open(os.path.join(main_dir, 'data/', dataset, 'valid_vocab.txt'), 'r') as f:
         valid_vocab = json.loads(f.read())
@@ -108,57 +138,61 @@ if __name__ == '__main__':
                      }
 
     # if we already have the parameters
-    if bool(strtobool(args.train.lower())) is False:
-        pre_trained = True
-    else:
-        pre_trained = False
-
+    pre_trained = args.pre_trained                                          # use existing parameters
     load_param_dir = out_dir                                                # directory with the saved parameters
 
-    train = bool(strtobool(args.train.lower()))                             # do not train if we already have the parameters
+    train = args.train                                                      # do not train if we already have the parameters
 
     training_iterations = args.max_iter                                     # number of training iterations
     training_batch_size = 200                                               # number of sentences per training iteration
     training_num_samples = 1                                                # number of samples per sentence per training iteration
-    warm_up = 20000                                                         # number of KL annealing iterations
-    word_drop = 0.3                                                         # percentage of words to drop to prevent vanishing KL term
+
+    if args.no_annealing:
+        warm_up = None
+    else:
+        warm_up = 20000                                                     # number of KL annealing iterations
+
+    if args.no_word_drop:
+        word_drop = None
+    else:
+        word_drop = 0.3                                                     # percentage of words to drop to prevent vanishing KL term
 
     grad_norm_constraint = None                                             # to prevent vanishing/exploding gradient
     update = lasagne.updates.adam                                           # the optimisation algorithm
     update_kwargs = {'learning_rate': 0.0001}                               # parameters for the optimisation algorithm
 
-    val_freq = 1000                                                         # how often to perform evaluation
+    val_freq = 10000                                                        # how often to perform evaluation
     val_batch_size = 100                                                    # number of sentences per per evaluation iteration
     val_num_samples = 1                                                     # number of samples per sentence per evaluation iteration
 
     save_params_every = 10000                                               # check-point for parameters saving
 
     # The second part of the settings is task-specific
-    generate_output_prior = bool(strtobool(args.generate_prior.lower()))                  # ???
-    generate_output_posterior = bool(strtobool(args.generate_posterior.lower()))          # ???
+    generate_output_prior = args.generate_prior                                           # ???
+    generate_output_posterior = args.generate_posterior                                   # ???
     generate_canvases = False                                                             # ???
 
-    impute_missing_words = False                                                          # ???
+    impute_missing_words = args.impute_missing_words                                      # ???
     drop_rate = 0.2                                                                       # ???
     missing_chars_iterations = 500                                                        # ???
 
-    find_best_matches = False                                                             # ???
+    find_best_matches = args.find_best_matches                                            # ???
     num_best_matches = 20                                                                 # ???
     best_matches_batch_size = 100                                                         # ???
 
-    follow_latent_trajectory = bool(strtobool(args.interpolate_latents.lower()))          # ???
+    follow_latent_trajectory = args.interpolate_latents                                   # ???
     latent_trajectory_steps = 5                                                           # ???
 
     num_outputs = 100                                                                     # ???
 
-    test = strtobool(args.test.lower())                                                   # ???
+    test = args.test                                                                      # ???
     test_batch_size = 500                                                                 # ???
     test_num_samples = 100                                                                # ???
     test_sub_sample_size = 10                                                             # ???
 
     run_kwargs = {'most_common': args.most_common,
                   'exclude_eos': False,
-                  'save_arrays': bool(strtobool(args.save_arrays.lower()))}
+                  'save_arrays': args.save_arrays}
 
     # Initialise the model
     run = Run(dataset=dataset,                                              # a folder where to read the dataset from
@@ -185,7 +219,7 @@ if __name__ == '__main__':
                   val_batch_size=val_batch_size,                                # number of sentences per per evaluation iteration
                   val_num_samples=val_num_samples,                              # number of samples per sentence per evaluation iteration
                   warm_up=warm_up,                                              # number of KL annealing iterations
-                  optimal_ratio=bool(strtobool(args.optimal_ratio.lower())),    # use the optimal ratio between the expectation and the KL in the ELBO
+                  optimal_ratio=args.optimal_ratio,                             # use the optimal ratio between the expectation and the KL in the ELBO
                   save_params_every=save_params_every,                          # check-point for parameters saving
                   word_drop=word_drop)                                          # percentage of words to drop to prevent vanishing KL term
 

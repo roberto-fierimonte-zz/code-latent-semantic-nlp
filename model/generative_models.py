@@ -290,7 +290,7 @@ class GenStanfordWords(object):
                                                        outputs_info=[best_scores_0, active_paths_init],
                                                        non_sequences=[all_embeddings, z_start]
                                                        )
-        # max(L) * N * B and max(L) * N * B * max(L)
+            # max(L) * N * B and max(L) * N * B * max(L)
 
         active_paths = active_paths[-1]  # N * B * max(L)
 
@@ -560,18 +560,10 @@ class GenLatentGateWords(object):
             l_current = net['rnn_' + str(h)]
 
         net['out'] = RecurrentLayer(l_current, num_units=self.embedding_dim, W_hid_to_hid=T.zeros, nonlinearity=None)
+
         net['gate_input'] = InputLayer((None, self.max_length, self.embedding_dim))
         net['bias'] = BiasLayer(net['out'])
         net['sigm'] = NonlinearityLayer(net['bias'], nonlinearity=sigmoid)
-
-        # def gate():
-        #     x = T.dtensor3('x')
-        #     y = T.dtensor3('y')
-        #     gate = (1 - x) * y
-        #
-        #     return theano.function([x, y], gate, allow_input_downcast=True)
-        #
-        # gate_fn = gate()
 
         net['gate'] = ElemwiseMergeLayer([net['sigm'], net['gate_input']], merge_function=lambda x, y: (1 - x) * y)
         net['concat'] = ConcatLayer([net['out'], net['gate']], axis=0)
@@ -605,7 +597,6 @@ class GenLatentGateWords(object):
         """
 
         z_start = T.dot(z, self.W_z)                                                                    # (S * N) x E
-
 
         x_dropped_pre_padded = T.concatenate([T.shape_padaxis(z_start, 1), x_dropped], axis=1)[:, :-1]  # (S * N) x max(L) x E
 
