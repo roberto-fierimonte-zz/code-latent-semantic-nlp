@@ -12,7 +12,7 @@ class SGVBWords(object):
     """
 
     def __init__(self, generative_model, recognition_model, z_dim, max_length, vocab_size, embedding_dim, dist_z_gen,
-                 dist_x_gen, dist_z_rec, gen_nn_kwargs, rec_nn_kwargs, eos_ind, most_common):
+                 dist_x_gen, dist_z_rec, gen_nn_kwargs, rec_nn_kwargs, eos_ind, most_common, m, teacher_forcing):
         """
 
         :param generative_model:        # class of the generative model
@@ -27,13 +27,15 @@ class SGVBWords(object):
         :param gen_nn_kwargs:           # params for the generative model
         :param rec_nn_kwargs:           # params for the recognition model
         :param eos_ind:                 # index of the EOS token
+        :param m:                       # balancing factor for the AutoGen training procedure
         """
 
         self.z_dim = z_dim
         self.max_length = max_length
         self.vocab_size = vocab_size
         self.embedding_dim = embedding_dim
-        self.most_common_idx = set(most_common).add(eos_ind)
+        self.most_common_idx = set(most_common)
+        self.most_common_idx.add(eos_ind)
 
         # Creates a V x E embedding matrix of samples from the Normal distribution with 0 Mean and 0.1 StD
         # This is an updatable variable (theano concept of "current value" and "update")
@@ -51,6 +53,8 @@ class SGVBWords(object):
         self.recognition_model = self.init_recognition_model(recognition_model)     # initialise recognition model
 
         self.eos_ind = eos_ind
+        self.m = m
+        self.teacher_forcing = teacher_forcing
 
     def init_generative_model(self, generative_model):
         """ Initialise the generative model
@@ -92,16 +96,6 @@ class SGVBWords(object):
         # Returns the embedding for the sentence
         return all_embeddings[x]
 
-    def bag_of_words(self, x):
-        """
-
-        :param x:
-        :return:
-        """
-
-
-        return
-
     def cut_off(self, x):
         """
 
@@ -124,13 +118,12 @@ class SGVBWords(object):
 
         return x_cut_off.T
 
-    def symbolic_elbo(self, x, x_m, num_samples, optimal_ratio=False, beta=None, drop_mask=None):
+    def symbolic_elbo(self, x, x_m, num_samples, beta=None, drop_mask=None):
         """
 
         :param x:               (N x max(L)) matrix
         :param x_m:             (N x max(L)) matrix
         :param num_samples:     int (S)
-        :param optimal_ratio:   boolean
         :param beta:            scalar
         :param drop_mask:       (N x max(L)) matrix
 
@@ -138,28 +131,37 @@ class SGVBWords(object):
         """
 
         x_embedded = self.embedder(x, self.all_embeddings)                                                  # N x max(L) x E
-        x_m_embedded = self.embedder(x_m, self.all_embeddings)                                              # N x max(L) x E
+        if isinstance(self.recognition_model, RecMLP):
+            x_m_embedded = x_m
+        else:
+            x_m_embedded = self.embedder(x_m, self.all_embeddings)                                          # N x max(L) x E
 
         z, kl = self.recognition_model.get_samples_and_kl_std_gaussian(x_m, x_m_embedded, num_samples)      # ((S * N) x Z) and (N x 1)
 
-        if drop_mask is None or isinstance(self.recognition_model, RecMLP):
+        if drop_mask is None:
             x_embedded_dropped = x_embedded                                                                 # N x max(L) x E
         else:
             x_embedded_dropped = x_embedded * T.shape_padright(drop_mask)                                   # N x max(L) x E
 
-        log_p_x = self.generative_model.log_p_x(x, x_embedded, x_embedded_dropped, z, self.all_embeddings)  # S x N
-
-        if optimal_ratio:
-            elbo = T.sum((2. / num_samples) * log_p_x) - T.sum(kl)
+        if self.teacher_forcing:
+            log_p_x = self.generative_model.log_p_x(x, x_embedded, x_embedded_dropped, z, self.all_embeddings)  # S x N
         else:
-            if beta is None:
-                elbo = T.sum((1. / num_samples) * log_p_x) - T.sum(kl)
-            else:
-                elbo = T.sum((1. / num_samples) * log_p_x) - T.sum(beta * kl)
+            log_p_x, scan_updates = self.generative_model.log_p_x_no_teacher_forcing(z, self.all_embeddings, self.eos_ind)
+
+        # if optimal_ratio:
+        #     elbo = T.sum((2. / num_samples) * log_p_x) - T.sum(kl)
+        # else:
+        if beta is None:
+            elbo = (self.m + 1) * T.sum((1. / num_samples) * log_p_x) - T.sum(kl)
+        else:
+            elbo = (self.m + 1) * T.sum((1. / num_samples) * log_p_x) - T.sum(beta * kl)
 
         pp = T.exp(-(T.sum((1. / num_samples) * log_p_x) - T.sum(kl)) / T.sum(T.switch(T.lt(x, 0), 0, 1)))
 
-        return elbo, T.sum(kl), pp
+        if self.teacher_forcing:
+            return elbo, T.sum(kl), pp
+        else:
+            return elbo, T.sum(kl), pp, scan_updates
 
     def elbo_fn(self, num_samples):
         """
@@ -172,24 +174,33 @@ class SGVBWords(object):
         x = T.imatrix('x')                                                                              # N x max(L)
         x_m = T.imatrix('x_m')                                                                          # N x max(L)
 
-        elbo, kl, pp = self.symbolic_elbo(x, x_m, num_samples, beta=None, drop_mask=None, optimal_ratio=False)
+        if self.teacher_forcing:
+            elbo, kl, pp = self.symbolic_elbo(x, x_m, num_samples, beta=None, drop_mask=None)
 
-        elbo_fn = theano.function(inputs=[x, x_m],
-                                  outputs=[elbo, kl, pp],
-                                  allow_input_downcast=True,
-                                  on_unused_input='ignore',
-                                  )
+            elbo_fn = theano.function(inputs=[x, x_m],
+                                      outputs=[elbo, kl, pp],
+                                      allow_input_downcast=True,
+                                      on_unused_input='ignore',
+                                      )
+        else:
+            elbo, kl, pp, scan_updates = self.symbolic_elbo(x, x_m, num_samples, beta=None, drop_mask=None)
+
+            elbo_fn = theano.function(inputs=[x, x_m],
+                                      outputs=[elbo, kl, pp],
+                                      allow_input_downcast=True,
+                                      on_unused_input='ignore',
+                                      updates=scan_updates
+                                      )
 
         return elbo_fn
 
-    def optimiser(self, num_samples, grad_norm_constraint, update, update_kwargs, optimal_ratio, saved_update=None):
+    def optimiser(self, num_samples, grad_norm_constraint, update, update_kwargs, saved_update=None):
         """
 
         :param num_samples:             scalar
         :param grad_norm_constraint:    ...
         :param update:                  ...
         :param update_kwargs:           ...
-        :param optimal_ratio:           ...
         :param saved_update:            ...
 
         :return:
@@ -200,7 +211,10 @@ class SGVBWords(object):
         beta = T.scalar('beta')                                                                         # scalar
         drop_mask = T.matrix('drop_mask')                                                               # N x max(L)
 
-        elbo, kl, pp = self.symbolic_elbo(x, x_m, num_samples, optimal_ratio, beta, drop_mask)
+        if self.teacher_forcing:
+            elbo, kl, pp = self.symbolic_elbo(x, x_m, num_samples, beta, drop_mask)
+        else:
+            elbo, kl, pp, scan_updates = self.symbolic_elbo(x, x_m, num_samples, beta, drop_mask)
 
         params = self.generative_model.get_params() + self.recognition_model.get_params() + [self.all_embeddings]
         grads = T.grad(-elbo, params, disconnected_inputs='ignore')
@@ -212,6 +226,9 @@ class SGVBWords(object):
         update_kwargs['params'] = params
 
         updates = update(**update_kwargs)
+        if not self.teacher_forcing:
+            for var in scan_updates:
+                updates[var] = scan_updates[var]
 
         if saved_update is not None:
             for u, v in zip(updates, saved_update.keys()):
@@ -349,19 +366,55 @@ class SGVBWords(object):
 
         return self.generative_model.follow_latent_trajectory_fn(self.all_embeddings, alphas, num_samples, beam_size)
 
+    def follow_latent_trajectory_posterior_fn(self, num_samples, beam_size):
+
+        x1 = T.imatrix('x1')
+        x2 = T.imatrix('x2')
+        alphas = T.vector('alphas')
+
+        def follow_latents_trajectory_posterior_theano(self, alphas, x1, x2, num_samples, beam_size):
+
+            x1_emb = self.embedder(x1, self.all_embeddings)
+            x2_emb = self.embedder(x2, self.all_embeddings)
+
+            z1 = self.recognition_model.get_samples(x1, x1_emb, num_samples)
+            z2 = self.recognition_model.get_samples(x2, x2_emb, num_samples)
+
+            z1_rep = T.extra_ops.repeat(z1, alphas.shape[0], axis=0)  # (S*A) * dim(z)
+            z2_rep = T.extra_ops.repeat(z2, alphas.shape[0], axis=0)  # (S*A) * dim(z)
+
+            alphas_rep = T.tile(alphas, num_samples)                  # (S*A)
+
+            z = (T.shape_padright(alphas_rep) * z1_rep) + (T.shape_padright(T.ones_like(alphas_rep) - alphas_rep) * z2_rep)
+            # (S*A) * dim(z)
+
+            x_gen_sampled, x_gen_argmax, updates = self.generative_model.generate_text(z, self.all_embeddings)
+
+            x_gen_beam = self.generative_model.beam_search(z, self.all_embeddings, beam_size)
+
+            follow_latent_trajectory = theano.function(inputs=[alphas, x1, x2],
+                                                       outputs=[x_gen_sampled, x_gen_argmax, x_gen_beam],
+                                                       updates=updates,
+                                                       allow_input_downcast=True,
+                                                       )
+
+            return follow_latent_trajectory
+
+        return follow_latents_trajectory_posterior_theano(self, alphas, x1, x2, num_samples, beam_size)
+
     def find_best_matches_fn(self):
         """
 
         :return:
         """
 
-        sentences_in = T.imatrix('sentences_in')                                                        # S x max(L)
-        sentences_eval = T.imatrix('sentences_eval')                                                    # N x max(L)
+        sentences_in = T.imatrix('sentences_in')                                                         # S x max(L)
+        sentences_eval = T.imatrix('sentences_eval')                                                     # N x max(L)
 
-        sentences_in_embedded = self.embedder(sentences_in, self.all_embeddings)                        # S x max(L) x E
-        sentences_eval_embedded = self.embedder(sentences_eval, self.all_embeddings)                    # N x max(L) x E
+        sentences_in_embedded = self.embedder(sentences_in, self.all_embeddings)                         # S x max(L) x E
+        sentences_eval_embedded = self.embedder(sentences_eval, self.all_embeddings)                     # N x max(L) x E
 
-        z = self.recognition_model.get_samples(sentences_in, sentences_in_embedded, 1, means_only=True) # S x Z
+        z = self.recognition_model.get_samples(sentences_in, sentences_in_embedded, 1, means_only=True)  # S x Z
 
         return self.generative_model.find_best_matches_fn(sentences_in, sentences_eval, sentences_eval_embedded, z,
                                                           self.all_embeddings)

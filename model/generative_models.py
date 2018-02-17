@@ -1,11 +1,12 @@
 from lasagne.layers import DenseLayer, get_all_param_values, get_all_params, get_output, InputLayer, LSTMLayer, \
-    RecurrentLayer, set_all_param_values, BiasLayer, NonlinearityLayer, ConcatLayer, ElemwiseMergeLayer
+    RecurrentLayer, set_all_param_values, BiasLayer, NonlinearityLayer, ConcatLayer, ElemwiseMergeLayer, GRULayer
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 from collections import OrderedDict
 
 from .utilities import last_d_softmax
 from nn.nonlinearities import sigmoid
 from nn.layers import CanvasRNNLayer
+from theano.printing import Print
 
 import theano.tensor as T
 import numpy as np
@@ -37,6 +38,7 @@ class GenStanfordWords(object):
         self.embedder = embedder
 
         self.nn_rnn_depth = nn_kwargs['rnn_depth']
+        self.nn_rnn_type = nn_kwargs['rnn_type']
         self.nn_rnn_hid_units = nn_kwargs['rnn_hid_units']
         self.nn_rnn_hid_nonlinearity = nn_kwargs['rnn_hid_nonlinearity']
 
@@ -50,7 +52,7 @@ class GenStanfordWords(object):
     def rnn_fn(self):
 
         """
-        Initialise generative LSTM Network
+        Initialise generative Recurrent Network
         """
 
         l_in = InputLayer((None, self.max_length, self.embedding_dim))
@@ -59,7 +61,11 @@ class GenStanfordWords(object):
 
         for h in range(self.nn_rnn_depth):
 
-            l_current = LSTMLayer(l_current, num_units=self.nn_rnn_hid_units, nonlinearity=self.nn_rnn_hid_nonlinearity)
+            if self.nn_rnn_type == 'GRU':
+                l_current = GRULayer(l_current, num_units=self.nn_rnn_hid_units)
+            else:
+                l_current = LSTMLayer(l_current, num_units=self.nn_rnn_hid_units,
+                                      nonlinearity=self.nn_rnn_hid_nonlinearity)
 
         l_out = RecurrentLayer(l_current, num_units=self.embedding_dim, W_hid_to_hid=T.zeros, nonlinearity=None)
 
@@ -87,28 +93,75 @@ class GenStanfordWords(object):
         :return probs: (S*N) * max(L) * E tensor
         """
 
-        z_start = T.dot(z, self.W_z)  # N * E
+        z_start = T.dot(z, self.W_z)                                                                    # N * E
 
-        x_dropped_pre_padded = T.concatenate([T.shape_padaxis(z_start, 1), x_dropped], axis=1)[:, :-1]  # (S*N) * max(L)
-        # * E
+        x_dropped_pre_padded = T.concatenate([T.shape_padaxis(z_start, 1), x_dropped], axis=1)[:, :-1]  # (S*N) * max(L) * E
 
-        hiddens = get_output(self.rnn, x_dropped_pre_padded)  # (S*N) * max(L) * E
+        hiddens = get_output(self.rnn, x_dropped_pre_padded)                                            # (S*N) * max(L) * E
 
-        probs_numerators = T.sum(x * hiddens, axis=-1)  # (S*N) * max(L)
+        probs_numerators = T.sum(x * hiddens, axis=-1)                                                  # (S*N) * max(L)
 
-        probs_denominators = T.dot(hiddens, all_embeddings.T)  # (S*N) * max(L) * D
+        probs_denominators = T.dot(hiddens, all_embeddings.T)                                           # (S*N) * max(L) * D
 
         if mode == 'all':
-            probs = last_d_softmax(probs_denominators)  # (S*N) * max(L) * D
+            probs = last_d_softmax(probs_denominators)                                                  # (S*N) * max(L) * D
+
         elif mode == 'true':
             probs_numerators -= T.max(probs_denominators, axis=-1)
             probs_denominators -= T.max(probs_denominators, axis=-1, keepdims=True)
 
-            probs = T.exp(probs_numerators) / T.sum(T.exp(probs_denominators), axis=-1)  # (S*N) * max(L)
+            probs = T.exp(probs_numerators) / T.sum(T.exp(probs_denominators), axis=-1)                 # (S*N) * max(L)
         else:
             raise Exception("mode must be in ['all', 'true']")
 
         return probs
+
+    def get_probs_no_teacher_forcing(self, z, all_embeddings):
+        """
+
+        :param z:
+        :param all_embeddings:
+
+        :return:
+        """
+
+        N = z.shape[0]
+        z_start = T.dot(z, self.W_z)
+        x_init_sampled = -T.ones((N, self.max_length), 'int32')  # N * max(L)
+        probs_init = T.zeros((N, self.max_length), 'float32')
+
+        def step(l, x_prev_sampled, probs_previous, z_start, all_embeddings):
+
+            x_prev_sampled_embedded = self.embedder(T.cast(x_prev_sampled, 'int32'), all_embeddings)
+            x_prev_sampled_reshaped = T.reshape(x_prev_sampled_embedded, (N, self.max_length, self.embedding_dim))
+
+            x_pre_padded = T.concatenate([T.shape_padaxis(z_start, 1), x_prev_sampled_reshaped], axis=1)[:, :-1]
+            # (N) * max(L) * E
+
+            target_embeddings = get_output(self.rnn, x_pre_padded)[:, l].reshape((N, self.embedding_dim))
+            # N * E
+
+            probs_denominators = T.dot(target_embeddings, all_embeddings.T)  # N * B * D
+            probs_normalised = last_d_softmax(probs_denominators)  # N * B * D
+
+            x_sampled_one_hot = self.dist_x.get_samples([T.shape_padaxis(probs_normalised, 1)])  # N * 1 * D
+
+            probs_selected = probs_normalised[T.nonzero(T.squeeze(x_sampled_one_hot))]
+            probs_current = T.set_subtensor(probs_previous[:, l], probs_selected)
+
+            # x_sampled_one_hot = theano.gradient.disconnected_grad(x_sampled_one_hot)
+            x_sampled_l = theano.gradient.disconnected_grad(T.argmax(x_sampled_one_hot, axis=-1).flatten())  # N
+
+            x_current_sampled = T.set_subtensor(x_prev_sampled[:, l], x_sampled_l)  # N * max(L)
+
+            return T.cast(x_current_sampled, 'int32'), T.cast(probs_current, 'float32')
+
+        ([x_sampled, probs], updates) = theano.scan(step,
+                                                    sequences=[T.arange(self.max_length)],
+                                                    outputs_info=[x_init_sampled, probs_init],
+                                                    non_sequences=[z_start, all_embeddings],
+                                                    )
+        return x_sampled[-1], probs[-1], updates
 
     def log_p_x(self, x, x_embedded, x_embedded_dropped, z, all_embeddings):
         """
@@ -122,20 +175,33 @@ class GenStanfordWords(object):
 
         S = T.cast(z.shape[0] / x.shape[0], 'int32')
 
-        x_rep = T.tile(x, (S, 1))  # (S*N) * max(L)
-        x_rep_padding_mask = T.switch(T.lt(x_rep, 0), 0, 1)  # (S*N) * max(L)
+        x_rep = T.tile(x, (S, 1))                                                                       # (S*N) * max(L)
+        x_rep_padding_mask = T.switch(T.lt(x_rep, 0), 0, 1)                                             # (S*N) * max(L)
 
-        x_embedded_rep = T.tile(x_embedded, (S, 1, 1))  # (S*N) * max(L) * E
-        x_embedded_dropped_rep = T.tile(x_embedded_dropped, (S, 1, 1))  # (S*N) * max(L) * E
+        x_embedded_rep = T.tile(x_embedded, (S, 1, 1))                                                  # (S*N) * max(L) * E
+        x_embedded_dropped_rep = T.tile(x_embedded_dropped, (S, 1, 1))                                  # (S*N) * max(L) * E
 
         probs = self.get_probs(x_embedded_rep, x_embedded_dropped_rep, z, all_embeddings, mode='true')  # (S*N) * max(L)
-        probs += T.cast(1.e-15, 'float32')  # (S*N) * max(L)
+        probs += T.cast(1.e-15, 'float32')                                                              # (S*N) * max(L)
 
-        log_p_x = T.sum(x_rep_padding_mask * T.log(probs), axis=-1)  # (S*N)
+        log_p_x = T.sum(x_rep_padding_mask * T.log(probs), axis=-1)                                     # (S*N)
 
-        L = T.sum(x_rep_padding_mask, axis=1)  # (S*N)
+        L = T.sum(x_rep_padding_mask, axis=1)                                                           # (S*N)
 
         return log_p_x
+
+    def log_p_x_no_teacher_forcing(self, z, all_embeddings, eos_ind):
+
+        x_sampled, probs, scan_updates = self.get_probs_no_teacher_forcing(z, all_embeddings)
+        eos_mask = T.where(T.eq(x_sampled, eos_ind), T.arange(0, self.max_length, dtype='float32'), eos_ind+1)
+        eos_index_rep = T.tile(eos_mask.min(axis=-1), (self.max_length, 1)).T
+        binary_mask = T.where(T.ge(T.tile(T.arange(0, self.max_length), (x_sampled.shape[0], 1)), eos_index_rep), 0, 1)
+
+        probs += T.cast(1.e-15, 'float32')
+
+        log_p_x = T.sum(binary_mask * T.log(probs), axis=-1)
+
+        return log_p_x, scan_updates
 
     def beam_search(self, z, all_embeddings, beam_size):
 

@@ -7,3 +7,7 @@ def last_d_softmax(x):
     out = e_x / e_x.sum(axis=-1, keepdims=True)
 
     return out
+
+
+def print_tensor_shape(name, tensor):
+    print(name, " Shape: ", T.shape(tensor).eval())

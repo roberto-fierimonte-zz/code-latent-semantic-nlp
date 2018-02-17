@@ -379,9 +379,9 @@ class RecMLP(RecModel):
         self.most_common = most_common
 
         if self.most_common is None:
-            self.input_size = vocab_size + 1
+            self.input_size = vocab_size
         else:
-            self.input_size = vocab_size - len(self.most_common) + 1
+            self.input_size = vocab_size - len(self.most_common)
 
         super().__init__(z_dim, max_length, vocab_size, dist_z)
 

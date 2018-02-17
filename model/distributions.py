@@ -129,7 +129,8 @@ class Categorical(object):
 
         probs = params[0]
 
-        samples_flat = random.multinomial(pvals=probs.reshape((probs.shape[0] * probs.shape[1], probs.shape[2])))
+        # return probs.reshape((probs.shape[0] * probs.shape[1], probs.shape[2])) + 1
+        samples_flat = random.multinomial(pvals=probs.reshape((probs.shape[0] * probs.shape[1], probs.shape[2])))  #, dtype='float32')
 
         samples = samples_flat.reshape(probs.shape)
 

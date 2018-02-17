@@ -24,6 +24,13 @@ def check_percentage(value):
     return fvalue
 
 
+def check_natural(value):
+    ivalue = int(value)
+    if ivalue < 0:
+        raise argparse.ArgumentTypeError("%s is an invalid natural number" % value)
+    return ivalue
+
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
@@ -35,14 +42,19 @@ if __name__ == '__main__':
     parser.add_argument('--max', '--max-length', default=30, dest='restrict_max_length', type=int)
     parser.add_argument('--dataset', default='BookCorpus', type=str)
     parser.add_argument('--generative-model', '--gen-model', '--decoder', default='Stanford', dest='generative_model')
+    parser.add_argument('--generative-net', '--gen-net', default='LSTM', dest='generative_network',
+                        choices=['LSTM', 'GRU'])
     parser.add_argument('--recognition-model', '--rec-model', '--encoder', default='LSTM', dest='recognition_model')
 
     # Params of the training
     parser.add_argument('--most-common', default=-1, dest='most_common', type=int)
     parser.add_argument('--max-iter', default=100000, type=int, dest='max_iter')
-    parser.add_argument('--optimal-beta', action='store_true', dest='optimal_ratio')
+    # parser.add_argument('--optimal-beta', action='store_true', dest='optimal_ratio')
+    parser.add_argument('-m', default=0., type=float)
+    # parser.add_argument('--beta', type=float, default=1.)
     parser.add_argument('--no-word-drop', action='store_true', dest='no_word_drop')
     parser.add_argument('--no-annealing', action='store_true', dest='no_annealing')
+    parser.add_argument('--no-teacher-forcing', action='store_true', dest='no_teacher_forcing')
 
     # Params of the task
     parser.add_argument('--train', action='store_true')
@@ -51,6 +63,7 @@ if __name__ == '__main__':
     parser.add_argument('--gen-prior', action='store_true', dest='generate_prior')
     parser.add_argument('--gen-posterior', action='store_true', dest='generate_posterior')
     parser.add_argument('--interpolate-latents', action='store_true', dest='interpolate_latents')
+    parser.add_argument('--interpolate-latents-posterior', action='store_true', dest='interpolate_latents_posterior')
     parser.add_argument('--impute-missing', '--missing_words', '--missing', '--impute', action='store_true',
                         dest='impute_missing_words')
     parser.add_argument('--find-best', '--find-matches', '--best-matches', action='store_true',
@@ -62,7 +75,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    if args.generative_model in ['Stanford', 'LSTM']:
+    if args.generative_model == 'Stanford':
         GenerativeModel = GenStanfordWords
     elif args.generative_model in ['AUTR', 'Canvas']:
         GenerativeModel = GenAUTRWords
@@ -79,15 +92,27 @@ if __name__ == '__main__':
         raise ValueError('{} is not a valid recognition model'.format(args.recognition_model))
 
     main_dir = '.'
-    out_dir = './output/{}/{}_{}_{}_{}to{}'.format(args.dataset, GenerativeModel.__name__, RecognitionModel.__name__,
-                                                   args.vocab_size, args.restrict_min_length, args.restrict_max_length)
+
+    if args.generative_model != 'Stanford' or args.generative_network == 'LSTM':
+        out_dir = './output/{}/{}_{}_{}_{}to{}'.format(args.dataset, GenerativeModel.__name__,
+                                                       RecognitionModel.__name__,
+                                                       args.vocab_size, args.restrict_min_length,
+                                                       args.restrict_max_length)
+    else:
+        out_dir = './output/{}/{}_{}{}_{}_{}to{}'.format(args.dataset, GenerativeModel.__name__,
+                                                         args.generative_network, RecognitionModel.__name__,
+                                                         args.vocab_size, args.restrict_min_length,
+                                                         args.restrict_max_length)
     if args.most_common > 0:
         out_dir = out_dir + 'Top{}'.format(args.most_common)
     else:
         out_dir = out_dir + 'All'
 
-    if args.optimal_ratio:
-        out_dir = out_dir + '_OptBeta'
+    # if args.optimal_ratio:
+    #     out_dir = out_dir + '_OptBeta'
+
+    if args.m != 0.:
+        out_dir = out_dir + '_m{}'.format(args.m)
 
     if not os.path.exists(out_dir):
         os.makedirs(out_dir, exist_ok=True)
@@ -107,6 +132,7 @@ if __name__ == '__main__':
 
     gen_nn_kwargs = {
         'rnn_depth': 1,                                                     # depth of the generative RNN
+        'rnn_type': args.generative_network,                                # which RNN type to use
         'rnn_hid_units': 500,                                               # number of hidden units in the generative RNN
         'rnn_hid_nonlinearity': lasagne.nonlinearities.tanh,                # type of generative RNN non-linearity
         'rnn_time_steps': 40,                                               # number of generative RNN time steps (maximum length of the sentence)
@@ -135,6 +161,8 @@ if __name__ == '__main__':
                      'dist_x_gen': Categorical,                             # distribution for the observed in the generative model
                      'dist_z_rec': GaussianDiagonal,                        # distribution for the latents in the observed model
                      'eos_ind': eos_ind,                                    # index of the EOS token
+                     'm': args.m,                                           # balancing factor for AutoGen training
+                     'teacher_forcing': not args.no_teacher_forcing         #
                      }
 
     # if we already have the parameters
@@ -165,7 +193,7 @@ if __name__ == '__main__':
     val_batch_size = 100                                                    # number of sentences per per evaluation iteration
     val_num_samples = 1                                                     # number of samples per sentence per evaluation iteration
 
-    save_params_every = 10000                                               # check-point for parameters saving
+    save_params_every = 100                                                 # check-point for parameters saving
 
     # The second part of the settings is task-specific
     generate_output_prior = args.generate_prior                                           # ???
@@ -181,6 +209,7 @@ if __name__ == '__main__':
     best_matches_batch_size = 100                                                         # ???
 
     follow_latent_trajectory = args.interpolate_latents                                   # ???
+    follow_latent_trajectory_posterior = args.interpolate_latents_posterior
     latent_trajectory_steps = 5                                                           # ???
 
     num_outputs = 100                                                                     # ???
@@ -219,7 +248,6 @@ if __name__ == '__main__':
                   val_batch_size=val_batch_size,                                # number of sentences per per evaluation iteration
                   val_num_samples=val_num_samples,                              # number of samples per sentence per evaluation iteration
                   warm_up=warm_up,                                              # number of KL annealing iterations
-                  optimal_ratio=args.optimal_ratio,                             # use the optimal ratio between the expectation and the KL in the ELBO
                   save_params_every=save_params_every,                          # check-point for parameters saving
                   word_drop=word_drop)                                          # percentage of words to drop to prevent vanishing KL term
 
@@ -231,6 +259,10 @@ if __name__ == '__main__':
     if follow_latent_trajectory:
         run.follow_latent_trajectory(num_samples=num_outputs,
                                      num_steps=latent_trajectory_steps)
+
+    if follow_latent_trajectory_posterior:
+        run.follow_latent_trajectory_posterior(num_outputs=num_outputs,
+                                               num_steps=latent_trajectory_steps)
 
     if test:
         run.test(test_batch_size, test_num_samples, test_sub_sample_size)

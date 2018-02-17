@@ -227,14 +227,20 @@ class RunWords(object):
     # Compute ELBO using the current validation batch
     def call_elbo_fn(self, elbo_fn, x, meaningful_mask):
 
-        x_m = self.vb.recognition_model.get_meaningful_words(x, meaningful_mask)
+        if isinstance(self.vb.recognition_model, RecMLP):
+            x_m = self.frequency_vec(x, self.most_common, self.vocab_size)
+        else:
+            x_m = self.vb.recognition_model.get_meaningful_words(x, meaningful_mask)
 
         return elbo_fn(x, x_m)
 
     # Optimise ELBO using the current training batch
     def call_optimiser(self, optimiser, x, beta, drop_mask, meaningful_mask):
 
-        x_m = self.vb.recognition_model.get_meaningful_words(x, meaningful_mask)
+        if isinstance(self.vb.recognition_model, RecMLP):
+            x_m = self.frequency_vec(x, self.most_common, self.vocab_size)
+        else:
+            x_m = self.vb.recognition_model.get_meaningful_words(x, meaningful_mask)
 
         return optimiser(x, x_m, beta, drop_mask)
 
@@ -258,25 +264,28 @@ class RunWords(object):
 
         return out
 
-    def print_latent_trajectory(self, latent_trajectory):
+    def print_latent_trajectory(self, latent_trajectory, alphas):
 
-        x_gen_sampled = latent_trajectory['generated_x_sampled_traj']
-        x_gen_argmax = latent_trajectory['generated_x_argmax_traj']
+        # x_gen_sampled = latent_trajectory['generated_x_sampled_traj']
+        # x_gen_argmax = latent_trajectory['generated_x_argmax_traj']
         x_gen_beam = latent_trajectory['generated_x_beam_traj']
 
         print('=' * 10)
 
-        for n in range(x_gen_sampled.shape[0]):
-            print('=' * 5)
+        for n in range(x_gen_beam.shape[0]):
+            if n % len(alphas) == 0:
+                ok = True
+                for k in range(len(alphas)):
+                    if '<UNK>' in ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n + k]]):
+                        ok = False
+                if ok:
+                    print('New Interpolation')
+                    print('=' * 5)
+            if ok:
+                print('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))
+                logger.info('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))
 
-            print('gen x sampled: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_sampled[n]]))
-            print(' gen x argmax: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_argmax[n]]))
-            print('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))
-            logger.info('gen x sampled: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_sampled[n]]))
-            logger.info(' gen x argmax: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_argmax[n]]))
-            logger.info('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))
-
-            print('-' * 10)
+                print('-' * 10)
 
         print('=' * 10)
 
@@ -307,7 +316,10 @@ class RunWords(object):
 
     def call_generate_output_posterior(self, generate_output_posterior, x, meaningful_mask):
 
-        x_m = self.vb.recognition_model.get_meaningful_words(x, meaningful_mask)
+        if isinstance(self.vb.recognition_model, RecMLP):
+            x_m = self.frequency_vec(x, self.most_common, self.vocab_size)
+        else:
+            x_m = self.vb.recognition_model.get_meaningful_words(x, meaningful_mask)
 
         z, x_gen_sampled, x_gen_argmax, x_gen_beam = generate_output_posterior(x, x_m)
 
@@ -325,7 +337,8 @@ class RunWords(object):
     def print_output_posterior(self, output_posterior):
 
         x = output_posterior['true_x_for_posterior']
-        x_m = output_posterior['meaningful_x_for_recognition']
+        if not isinstance(self.vb.recognition_model, RecMLP):
+            x_m = output_posterior['meaningful_x_for_recognition']
         x_gen_sampled = output_posterior['generated_x_sampled_posterior']
         x_gen_argmax = output_posterior['generated_x_argmax_posterior']
         x_gen_beam = output_posterior['generated_x_beam_posterior']
@@ -337,12 +350,14 @@ class RunWords(object):
         for n in range(x.shape[0]):
 
             print('       true x: ' + ' '.join([valid_vocab_for_true[i] for i in x[n]]).strip())
-            print(' restricted x: ' + ' '.join([valid_vocab_for_true[i] for i in x_m[n]]).strip())
+            if not isinstance(self.vb.recognition_model, RecMLP):
+                print(' restricted x: ' + ' '.join([valid_vocab_for_true[i] for i in x_m[n]]).strip())
             print('gen x sampled: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_sampled[n]]))
             print(' gen x argmax: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_argmax[n]]))
             print('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))
             logger.info('       true x: ' + ' '.join([valid_vocab_for_true[i] for i in x[n]]).strip())
-            logger.info(' restricted x: ' + ' '.join([valid_vocab_for_true[i] for i in x_m[n]]).strip())
+            if not isinstance(self.vb.recognition_model, RecMLP):
+                logger.info(' restricted x: ' + ' '.join([valid_vocab_for_true[i] for i in x_m[n]]).strip())
             logger.info('gen x sampled: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_sampled[n]]))
             logger.info(' gen x argmax: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_argmax[n]]))
             logger.info('   gen x beam: ' + ' '.join([self.valid_vocab[int(i)] for i in x_gen_beam[n]]))
@@ -354,18 +369,18 @@ class RunWords(object):
     # From here onwards, each function performs a different task
 
     @staticmethod
-    def frequency_vec(x, exclude, max_index):
+    def frequency_vec(x, exclude, voc_size):
         """
 
         :param x:
         :param exclude:
-        :param max_index:
+        :param voc_size:
         :return:
         """
 
         def array_to_list(array):
             c = Counter(array[(array >= 0) & (~np.in1d(array, exclude))])
-            l = np.zeros((max_index + 1), dtype=np.float32)
+            l = np.zeros((voc_size), dtype=np.float32)
             l[list(c.keys())] = list(c.values())
             return l
 
@@ -376,7 +391,7 @@ class RunWords(object):
             return np.delete(arr=khot, axis=1, obj=exclude)
 
     def train(self, n_iter, batch_size, num_samples, word_drop=None, grad_norm_constraint=None, update=adam,
-              update_kwargs=None, warm_up=None, optimal_ratio=False, val_freq=None, val_batch_size=0, val_num_samples=0,
+              update_kwargs=None, warm_up=None, val_freq=None, val_batch_size=0, val_num_samples=0,
               val_print_gen=5, val_beam_size=15, save_params_every=None):
 
         # If we already have parameters load them
@@ -391,8 +406,7 @@ class RunWords(object):
                                                grad_norm_constraint=grad_norm_constraint,
                                                update=update,
                                                update_kwargs=update_kwargs,
-                                               saved_update=saved_update,
-                                               optimal_ratio=optimal_ratio)
+                                               saved_update=saved_update)
 
         # Initialise ELBO function (symbolic function)
         elbo_fn = self.vb.elbo_fn(num_samples=val_num_samples)
@@ -435,11 +449,11 @@ class RunWords(object):
                 meaningful_mask = None
 
             # Perform training iteration using the current settings (now with meaningful_mask)
-            if isinstance(self.vb.recognition_model, RecMLP):
-                batch_freq = self.frequency_vec(batch, self.most_common, self.vocab_size + 1)
-                elbo, kl, pp = self.call_optimiser(optimiser, batch_freq, beta, drop_mask, None)
-            else:
-                elbo, kl, pp = self.call_optimiser(optimiser, batch, beta, drop_mask, meaningful_mask)
+            # if isinstance(self.vb.recognition_model, RecMLP):
+            #     batch_freq = self.frequency_vec(batch, self.most_common, self.vocab_size + 1)
+            #     elbo, kl, pp = self.call_optimiser(optimiser, batch_freq, beta, drop_mask, None)
+            # else:
+            elbo, kl, pp = self.call_optimiser(optimiser, batch, beta, drop_mask, meaningful_mask)
 
             print('Iteration ' + str(i + 1) + ': ELBO = ' + str(elbo/batch_size) + ' (KL = ' + str(kl/batch_size) +
                   ') per data point (PP = ' + str(pp) + ') (time taken = ' + str(time.clock() - start) +
@@ -780,7 +794,41 @@ class RunWords(object):
         out['generated_x_argmax_traj'] = x_gen_argmax
         out['generated_x_beam_traj'] = x_gen_beam
 
-        self.print_latent_trajectory(out)
+        self.print_latent_trajectory(out, alphas)
 
         for key, value in out.items():
             np.save(os.path.join(self.out_dir, key + '.npy'), value)
+
+    def follow_latent_trajectory_posterior(self, num_outputs, num_steps, num_samples=1, beam_size=15):
+
+        np.random.seed(1234)
+
+        sentences_indices = np.random.choice(len(self.X_test), num_outputs, replace=False)
+        sentences = np.array([self.X_test[ind] for ind in sentences_indices])
+
+        follow_latent_trajectory_posterior = self.vb.follow_latent_trajectory_posterior_fn(num_samples, beam_size)
+
+        step_size = 1. / (num_steps - 1)
+
+        alphas = np.arange(0., 1. + 1e-10, step_size)
+
+        for min_ind in range(0, len(self.X_test), 2):
+
+            batch = self.X_test[min_ind: min_ind + 2]
+            x1 = batch[0, :, None].T
+            x2 = batch[1, :, None].T
+
+            x_gen_sampled, x_gen_argmax, x_gen_beam = follow_latent_trajectory_posterior(alphas, x1, x2)
+
+            out = OrderedDict()
+
+            out['generated_x_sampled_traj'] = x_gen_sampled
+            out['generated_x_argmax_traj'] = x_gen_argmax
+            out['generated_x_beam_traj'] = x_gen_beam
+
+            print('First sentence:',  ' '.join([self.valid_vocab[int(i)] for i in batch[0]]))
+            print('Second sentence', ' '.join([self.valid_vocab[int(i)] for i in batch[1]]))
+            self.print_latent_trajectory(out, alphas)
+
+        # for key, value in out.items():
+        #     np.save(os.path.join(self.out_dir, key + '.npy'), value)
