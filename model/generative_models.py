@@ -3,10 +3,10 @@ from lasagne.layers import DenseLayer, get_all_param_values, get_all_params, get
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 from collections import OrderedDict
 
-from .utilities import last_d_softmax
+from .utilities import last_d_softmax, theano_print_shape, theano_print_value
 from nn.nonlinearities import sigmoid
 from nn.layers import CanvasRNNLayer
-from theano.printing import Print
+from theano.ifelse import ifelse
 
 import theano.tensor as T
 import numpy as np
@@ -116,9 +116,10 @@ class GenStanfordWords(object):
 
         return probs
 
-    def get_probs_no_teacher_forcing(self, z, all_embeddings):
+    def get_probs_no_teacher_forcing(self, x, z, all_embeddings):
         """
 
+        :param x:
         :param z:
         :param all_embeddings:
 
@@ -142,15 +143,20 @@ class GenStanfordWords(object):
             # N * E
 
             probs_denominators = T.dot(target_embeddings, all_embeddings.T)  # N * B * D
-            probs_normalised = last_d_softmax(probs_denominators)  # N * B * D
 
-            x_sampled_one_hot = self.dist_x.get_samples([T.shape_padaxis(probs_normalised, 1)])  # N * 1 * D
+            # Fix T.nonzero in probs_selected
+            probs_normalised = last_d_softmax(probs_denominators)                                       # N * B * D
 
-            probs_selected = probs_normalised[T.nonzero(T.squeeze(x_sampled_one_hot))]
-            probs_current = T.set_subtensor(probs_previous[:, l], probs_selected)
+            x_sampled_one_hot = self.dist_x.get_samples([T.shape_padaxis(probs_normalised, 1)])         # N * 1 * D
+            x_sampled_l = theano.gradient.disconnected_grad(T.argmax(x_sampled_one_hot, axis=-1).flatten())
+
+            probs_selected = probs_normalised[T.arange(N), x_sampled_l]
+            probs_true = probs_normalised[T.arange(N), x[:, l]]
+
+            # probs_current = T.set_subtensor(probs_previous[:, l], probs_selected)
+            probs_current = T.set_subtensor(probs_previous[:, l], probs_true)
 
             # x_sampled_one_hot = theano.gradient.disconnected_grad(x_sampled_one_hot)
-            x_sampled_l = theano.gradient.disconnected_grad(T.argmax(x_sampled_one_hot, axis=-1).flatten())  # N
 
             x_current_sampled = T.set_subtensor(x_prev_sampled[:, l], x_sampled_l)  # N * max(L)
 
@@ -190,16 +196,22 @@ class GenStanfordWords(object):
 
         return log_p_x
 
-    def log_p_x_no_teacher_forcing(self, z, all_embeddings, eos_ind):
+    def log_p_x_no_teacher_forcing(self, x, z, all_embeddings, eos_ind):
 
-        x_sampled, probs, scan_updates = self.get_probs_no_teacher_forcing(z, all_embeddings)
-        eos_mask = T.where(T.eq(x_sampled, eos_ind), T.arange(0, self.max_length, dtype='float32'), eos_ind+1)
-        eos_index_rep = T.tile(eos_mask.min(axis=-1), (self.max_length, 1)).T
-        binary_mask = T.where(T.ge(T.tile(T.arange(0, self.max_length), (x_sampled.shape[0], 1)), eos_index_rep), 0, 1)
+        S = T.cast(z.shape[0] / x.shape[0], 'int32')
+
+        x_rep = T.tile(x, (S, 1))  # (S*N) * max(L)
+        x_rep_padding_mask = T.switch(T.lt(x_rep, 0), 0, 1)
+
+        _, probs, scan_updates = self.get_probs_no_teacher_forcing(x, z, all_embeddings)
+
+        # eos_mask = T.where(T.eq(x_sampled, eos_ind), T.arange(0, self.max_length, dtype='float32'), eos_ind+1)
+        # eos_index_rep = T.tile(eos_mask.min(axis=-1), (self.max_length, 1)).T
+        # binary_mask = T.where(T.ge(T.tile(T.arange(0, self.max_length), (x_sampled.shape[0], 1)), eos_index_rep), 0, 1)
 
         probs += T.cast(1.e-15, 'float32')
 
-        log_p_x = T.sum(binary_mask * T.log(probs), axis=-1)
+        log_p_x = T.sum(x_rep_padding_mask * T.log(probs), axis=-1)
 
         return log_p_x, scan_updates
 

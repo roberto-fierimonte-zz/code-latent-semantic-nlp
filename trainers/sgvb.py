@@ -146,7 +146,7 @@ class SGVBWords(object):
         if self.teacher_forcing:
             log_p_x = self.generative_model.log_p_x(x, x_embedded, x_embedded_dropped, z, self.all_embeddings)  # S x N
         else:
-            log_p_x, scan_updates = self.generative_model.log_p_x_no_teacher_forcing(z, self.all_embeddings, self.eos_ind)
+            log_p_x, scan_updates = self.generative_model.log_p_x_no_teacher_forcing(x, z, self.all_embeddings, self.eos_ind)
 
         # if optimal_ratio:
         #     elbo = T.sum((2. / num_samples) * log_p_x) - T.sum(kl)

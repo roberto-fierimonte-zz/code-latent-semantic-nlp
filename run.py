@@ -441,7 +441,7 @@ class RunWords(object):
                 for n in range(len(drop_indices)):
                     drop_mask[n][drop_indices[n]] = 0.
             else:
-                drop_mask = None
+                drop_mask = np.ones_like(batch)
 
             if self.meaningful_mask_train is not None:
                 meaningful_mask = self.meaningful_mask_train[batch_indices]
@@ -476,11 +476,10 @@ class RunWords(object):
 
                 val_elbo, val_kl, val_pp = self.call_elbo_fn(elbo_fn, val_batch, val_meaningful_mask)
 
-                print('Test set ELBO = ' + str(val_elbo/val_batch_size) + ' (KL = ' + str(kl/batch_size) +\
+                print('Test set ELBO = ' + str(val_elbo/val_batch_size) + ' (KL = ' + str(val_kl/val_batch_size) +
                                ') per data point (PP = ' + str(val_pp) + ')')
-                logger.info('Test set ELBO = ' + str(val_elbo / val_batch_size) + ' (KL = ' + str(kl / batch_size) + \
+                logger.info('Test set ELBO = ' + str(val_elbo / val_batch_size) + ' (KL = ' + str(val_kl/val_batch_size) +
                       ') per data point (PP = ' + str(val_pp) + ')')
-
 
                 output_prior = self.call_generate_output_prior(generate_output_prior)
 
